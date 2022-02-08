@@ -138,10 +138,10 @@ impl Page {
     /// u16::from_le_bytes(data[X..Y].try_into().unwrap());
     pub fn from_bytes(data: &[u8]) -> Self {
         let mut p = Page {
-            p_id: PageId::from_le_bytes(data[0..2].try_into().unwrap()),
-            highest_s_id: SlotId::from_le_bytes(data[2..4].try_into().unwrap()),
-            next_s_id: SlotId::from_le_bytes(data[4..6].try_into().unwrap()),
-            end_of_used_space: u16::from_le_bytes(data[6..8].try_into().unwrap()),
+            p_id: PageId::from_be_bytes(data[0..2].try_into().unwrap()),
+            highest_s_id: SlotId::from_be_bytes(data[2..4].try_into().unwrap()),
+            next_s_id: SlotId::from_be_bytes(data[4..6].try_into().unwrap()),
+            end_of_used_space: u16::from_be_bytes(data[6..8].try_into().unwrap()),
             data: [0u8;PAGE_SIZE],
         };
         p.data.clone_from_slice(&data[0..PAGE_SIZE]);
