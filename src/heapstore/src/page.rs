@@ -3,6 +3,8 @@ use common::PAGE_SIZE;
 use std::convert::TryInto;
 use std::mem;
 
+pub const GENERAL_METADATA_SIZE: usize = 8;
+pub const RECORD_METADATA_SIZE: usize = 6;
 
 /// The struct for a page. Note this can hold more elements/meta data when created,
 /// but it must be able to be packed/serialized/marshalled into the data array of size
@@ -13,6 +15,12 @@ use std::mem;
 /// The rest must filled as much as possible to hold values.
 pub(crate) struct Page {
     /// The data for data
+    /// Header: 8 + 6*slots bytes for metadata
+    /// Body: PAGE_SIZE - Header
+    p_id: PageId,
+    highest_s_id: SlotId,
+    next_s_id: SlotId,
+    end_of_used_space: u16,
     data: [u8; PAGE_SIZE],
 }
 
@@ -20,12 +28,24 @@ pub(crate) struct Page {
 impl Page {
     /// Create a new page
     pub fn new(page_id: PageId) -> Self {
-        panic!("TODO milestone pg");
+        let mut p = Page {
+            p_id: page_id,
+            highest_s_id: 0,
+            next_s_id: 0,
+            end_of_used_space: PAGE_SIZE as u16,
+            data: [0; PAGE_SIZE],
+        };
+        p.data[0..2].clone_from_slice(&p.p_id.to_be_bytes());
+        p.data[2..4].clone_from_slice(&p.next_s_id.to_be_bytes());
+        p.data[4..6].clone_from_slice(&p.highest_s_id.to_be_bytes());
+        p.data[6..8].clone_from_slice(&p.end_of_used_space.to_be_bytes());
+        return p;
+
     }
 
     /// Return the page id for a page
     pub fn get_page_id(&self) -> PageId {
-        panic!("TODO milestone pg");
+        return self.p_id;
     }
 
 
@@ -41,7 +61,33 @@ impl Page {
     /// self.data[X..y].clone_from_slice(&bytes);
 
     pub fn add_value(&mut self, bytes: &[u8]) -> Option<SlotId> {
-        panic!("TODO milestone pg");
+        let b_size:usize = bytes.len();
+        let head_end = self.get_header_size();
+        let remaining_space:usize = self.end_of_used_space as usize - (head_end + RECORD_METADATA_SIZE);
+        let start:usize = (self.end_of_used_space as usize) - &b_size;
+
+        // Fill data in (or return None if it doesn't fit)
+        if &remaining_space >= &b_size{
+            self.data[*&start..*&(&start + &b_size + 1)].clone_from_slice(&bytes);
+        } else {
+            return None;
+        }
+
+        // Update metadata
+        let mut s_id_offset = head_end;
+        let next_copy = *&self.next_s_id;
+        if &self.highest_s_id == &self.next_s_id{
+            self.highest_s_id += 1;
+            self.next_s_id += 1;
+        } else {
+            s_id_offset = GENERAL_METADATA_SIZE + RECORD_METADATA_SIZE * self.next_s_id as usize;
+            self.next_s_id = u16::from_be_bytes(self.data[s_id_offset..(s_id_offset+2)].try_into().unwrap());
+        }
+        self.data[s_id_offset..(s_id_offset + 2)].clone_from_slice(&next_copy.to_be_bytes());
+        self.data[(&s_id_offset + 2)..(&s_id_offset + 4)].clone_from_slice(&b_size.to_be_bytes());
+        self.data[(&s_id_offset + 4)..(&s_id_offset + 6)].clone_from_slice(&start.to_be_bytes());
+        self.end_of_used_space = start as u16;
+        return Some(next_copy);
     }
 
     /// Return the bytes for the slotId. If the slotId is not valid then return None
@@ -80,14 +126,15 @@ impl Page {
     /// Will be used by tests. Optional for you to use in your code
     #[allow(dead_code)]
     pub(crate) fn get_header_size(&self) -> usize {
-        panic!("TODO milestone pg");
+        usize::from(GENERAL_METADATA_SIZE + 
+            *&self.highest_s_id as usize * RECORD_METADATA_SIZE)
     }
 
     /// A utility function to determine the largest block of free space in the page.
     /// Will be used by tests. Optional for you to use in your code
     #[allow(dead_code)]
     pub(crate) fn get_largest_free_contiguous_space(&self) -> usize {
-        panic!("TODO milestone pg");
+        *&self.end_of_used_space as usize - &self.get_header_size()
     }
 }
 
