@@ -80,7 +80,7 @@ impl Page {
             self.highest_s_id += 1;
             self.next_s_id += 1;
         } else {
-            s_id_offset = GENERAL_METADATA_SIZE + RECORD_METADATA_SIZE * self.next_s_id as usize;
+            s_id_offset = self.get_slot_offset(self.next_s_id);
             self.next_s_id = u16::from_be_bytes(self.data[s_id_offset..(s_id_offset+2)].try_into().unwrap());
         }
         self.data[s_id_offset..(s_id_offset + 2)].clone_from_slice(&next_copy.to_be_bytes());
@@ -92,7 +92,7 @@ impl Page {
 
     /// Return the bytes for the slotId. If the slotId is not valid then return None
     pub fn get_value(&self, slot_id: SlotId) -> Option<Vec<u8>> {
-        let size_start = GENERAL_METADATA_SIZE + (RECORD_METADATA_SIZE * slot_id as usize) + 2;
+        let size_start = self.get_slot_offset(slot_id) + 2;
         let slot_size = u16::from_be_bytes(self.data[size_start..size_start+2].try_into().unwrap());
         if u16::from_be_bytes(self.data[size_start-2..size_start].try_into().unwrap()) as SlotId != slot_id{
             return None;
@@ -107,7 +107,31 @@ impl Page {
     /// The space for the value should be free to use for a later added value.
     /// HINT: Return Some(()) for a valid delete
     pub fn delete_value(&mut self, slot_id: SlotId) -> Option<()> {
-        panic!("TODO milestone pg");
+        let slot_start = self.get_slot_offset(slot_id);
+        let id = u16::from_be_bytes(self.data[slot_start..slot_start+2].try_into().unwrap()) as SlotId;
+        if slot_id >= self.highest_s_id || id != slot_id{
+            return None;
+        };
+        let size = u16::from_be_bytes(self.data[slot_start+2..slot_start+4].try_into().unwrap());
+        let offset = u16::from_be_bytes(self.data[slot_start+4..slot_start+6].try_into().unwrap());
+        
+        // Compress data
+        let moving_data = self.data[self.end_of_used_space as usize..offset as usize].to_vec();
+        self.data[(&self.end_of_used_space+size) as usize..(offset+size) as usize].clone_from_slice(&moving_data);
+        
+        // Update metadata
+        let mut current_offset = self.get_slot_offset(0) + 4;
+        while current_offset < self.get_header_size() {
+            let offset_value = u16::from_be_bytes(self.data[current_offset..current_offset+2].try_into().unwrap());
+            if offset_value < offset{
+                self.data[(current_offset as usize)..(current_offset as usize + 2)].clone_from_slice(&(u16::to_be_bytes(offset_value+&size)));
+            };
+            current_offset += RECORD_METADATA_SIZE;
+        }
+        self.data[slot_start..slot_start+2].clone_from_slice(&(u16::to_be_bytes(self.next_s_id)));
+        self.next_s_id = slot_id;
+        return Some(())
+        
     }
 
     /// Create a new page from the byte array.
@@ -128,13 +152,17 @@ impl Page {
         panic!("TODO milestone pg");
     }
 
+    /// A utility function to return the offset to get to a slot in the header
+    pub fn get_slot_offset(&self,slot_id: SlotId) -> usize {
+        GENERAL_METADATA_SIZE + (RECORD_METADATA_SIZE * slot_id as usize)
+    }
+
     /// A utility function to determine the size of the header in the page
     /// when serialized/to_bytes.
     /// Will be used by tests. Optional for you to use in your code
     #[allow(dead_code)]
     pub(crate) fn get_header_size(&self) -> usize {
-        usize::from(GENERAL_METADATA_SIZE + 
-            *&self.highest_s_id as usize * RECORD_METADATA_SIZE)
+        self.get_slot_offset(self.highest_s_id)
     }
 
     /// A utility function to determine the largest block of free space in the page.
