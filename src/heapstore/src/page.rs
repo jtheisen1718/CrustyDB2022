@@ -68,7 +68,7 @@ impl Page {
 
         // Fill data in (or return None if it doesn't fit)
         if &remaining_space >= &b_size{
-            self.data[*&start..*&(&start + &b_size + 1)].clone_from_slice(&bytes);
+            self.data[*&start..*&(&start + &b_size)].clone_from_slice(&bytes);
         } else {
             return None;
         }
@@ -84,15 +84,22 @@ impl Page {
             self.next_s_id = u16::from_be_bytes(self.data[s_id_offset..(s_id_offset+2)].try_into().unwrap());
         }
         self.data[s_id_offset..(s_id_offset + 2)].clone_from_slice(&next_copy.to_be_bytes());
-        self.data[(&s_id_offset + 2)..(&s_id_offset + 4)].clone_from_slice(&b_size.to_be_bytes());
-        self.data[(&s_id_offset + 4)..(&s_id_offset + 6)].clone_from_slice(&start.to_be_bytes());
+        self.data[(&s_id_offset + 2)..(&s_id_offset + 4)].clone_from_slice(&(*&b_size as u16).to_be_bytes());
+        self.data[(&s_id_offset + 4)..(&s_id_offset + 6)].clone_from_slice(&(*&start as u16).to_be_bytes());
         self.end_of_used_space = start as u16;
         return Some(next_copy);
     }
 
     /// Return the bytes for the slotId. If the slotId is not valid then return None
     pub fn get_value(&self, slot_id: SlotId) -> Option<Vec<u8>> {
-        panic!("TODO milestone pg");
+        let size_start = GENERAL_METADATA_SIZE + (RECORD_METADATA_SIZE * slot_id as usize) + 2;
+        let slot_size = u16::from_be_bytes(self.data[size_start..size_start+2].try_into().unwrap());
+        if u16::from_be_bytes(self.data[size_start-2..size_start].try_into().unwrap()) as SlotId != slot_id{
+            return None;
+        }
+        let offset = u16::from_be_bytes(self.data[size_start+2..size_start+4].try_into().unwrap());
+        return Some(self.data[offset as usize..offset as usize +slot_size as usize].to_vec());
+
     }
 
     /// Delete the bytes/slot for the slotId. If the slotId is not valid then return None
