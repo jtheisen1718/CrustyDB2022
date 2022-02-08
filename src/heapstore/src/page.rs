@@ -36,9 +36,6 @@ impl Page {
             data: [0; PAGE_SIZE],
         };
         p.data[0..2].clone_from_slice(&p.p_id.to_be_bytes());
-        p.data[2..4].clone_from_slice(&p.next_s_id.to_be_bytes());
-        p.data[4..6].clone_from_slice(&p.highest_s_id.to_be_bytes());
-        p.data[6..8].clone_from_slice(&p.end_of_used_space.to_be_bytes());
         return p;
 
     }
@@ -140,7 +137,15 @@ impl Page {
     /// (the example is for a u16 type and the data store in little endian)
     /// u16::from_le_bytes(data[X..Y].try_into().unwrap());
     pub fn from_bytes(data: &[u8]) -> Self {
-        panic!("TODO milestone pg");
+        let mut p = Page {
+            p_id: PageId::from_le_bytes(data[0..2].try_into().unwrap()),
+            highest_s_id: SlotId::from_le_bytes(data[2..4].try_into().unwrap()),
+            next_s_id: SlotId::from_le_bytes(data[4..6].try_into().unwrap()),
+            end_of_used_space: u16::from_le_bytes(data[6..8].try_into().unwrap()),
+            data: [0u8;PAGE_SIZE],
+        };
+        p.data.clone_from_slice(&data[0..PAGE_SIZE]);
+        return p;
     }
 
     /// Convert a page into bytes. This must be same size as PAGE_SIZE.
@@ -149,7 +154,12 @@ impl Page {
     /// HINT: To convert a vec of bytes using little endian, use
     /// to_le_bytes().to_vec()
     pub fn get_bytes(&self) -> Vec<u8> {
-        panic!("TODO milestone pg");
+        let mut d = [0u8;PAGE_SIZE];
+        d.clone_from_slice(&self.data[0..PAGE_SIZE]);
+        d[2..4].clone_from_slice(&self.next_s_id.to_be_bytes());
+        d[4..6].clone_from_slice(&self.highest_s_id.to_be_bytes());
+        d[6..8].clone_from_slice(&self.end_of_used_space.to_be_bytes());
+        return d.to_vec();
     }
 
     /// A utility function to return the offset to get to a slot in the header
