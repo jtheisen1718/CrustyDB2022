@@ -1,0 +1,47 @@
+A brief describe of your solution, in particular what design decisions you took and why. 
+This is only needed for part of your solutions that had some significant work 
+(e.g. just returning a counter or a pass through function has no design decision).
+
+My solution utilized the 8 bytes of general metadata space for the page_id (2 bytes),
+the highest slot_id that had been added (2 bytes), the next slot_id to be filled in
+(2 bytes), and the offset to the end of the data.
+For the record metadata space, I used 2 bytes for the slot_id, 2 bytes for the size
+of the record, and 2 bytes for the offset of the record from the end of the file.
+
+I decided my page struct would just be the full byte array along with each of the 
+general metadata pieces available for easy access. This felt like a good balance
+between having everything easily accessible and making serialization difficult
+by decomposing my whole array in my struct.
+
+I decided my data would be compressed, so adding data was easy, I just had to append
+to wherever the end_of_used_space offset pointed to. And update whatever my general
+metadata told me the next slot_id to be updated should be.
+
+The compression did make deleting more difficult, but I saw that I could just update
+all of the byte data at once by copying it and pasting it whatever the size of the
+deletion was over. The metadata was then fairly easy to update by looping through all
+the slots and adding the size of the deleted record to each offset.
+
+Getting values was fairly easy as well, I was able to find where slots would be 
+by finding the byte that was 6 * x slots plus 8 bytes for general metadata away from
+the first byte. Storing the slot metadata sequentially was vital for this to be so easy
+I created a helper function to make accessing the slot id more clean.
+
+To create the page I simply had to update the general metadata and return the byte array.
+Reading an array was just as easy because the general metadata was in the same place 
+every time and it was the only information the page had to draw out of the array.
+
+How long you roughly spent on the milestone, and what would have liked/disliked on the milestone.
+I spent 20 hours on the milestone. I actually liked everything about it, I just didn't 
+have enough time to work on it. This was by no means a result of the amount of time we were given,
+I was just very busy these two weeks and did not manage my time as well as I could have.
+
+If you know some part of the milestone is incomplete, write up what parts are not working, 
+how close you think you are, and what part(s) you got stuck on.
+
+I did not complete the hidden tests or any of the iterator functions. I think
+I am close on them, I just ran out of time. I will definitely be able to get them
+up and running after the due date for this project, but I understand that that doesn't
+count for credit beyond it helping in future milestones.
+I would've liked to spend much more time cleaning up my code and consolidating work into 
+helper functions, but I prioritized functionality over cleanliness.

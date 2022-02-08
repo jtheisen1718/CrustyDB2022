@@ -37,14 +37,12 @@ impl Page {
         };
         p.data[0..2].clone_from_slice(&p.p_id.to_be_bytes());
         return p;
-
     }
 
     /// Return the page id for a page
     pub fn get_page_id(&self) -> PageId {
         return self.p_id;
     }
-
 
     /// Attempts to add a new value to this page if there is space available.
     /// Returns Some(SlotId) if it was inserted or None if there was not enough space.
@@ -58,13 +56,14 @@ impl Page {
     /// self.data[X..y].clone_from_slice(&bytes);
 
     pub fn add_value(&mut self, bytes: &[u8]) -> Option<SlotId> {
-        let b_size:usize = bytes.len();
+        let b_size: usize = bytes.len();
         let head_end = self.get_header_size();
-        let remaining_space:usize = self.end_of_used_space as usize - (head_end + RECORD_METADATA_SIZE);
-        let start:usize = (self.end_of_used_space as usize) - &b_size;
+        let remaining_space: usize =
+            self.end_of_used_space as usize - (head_end + RECORD_METADATA_SIZE);
+        let start: usize = (self.end_of_used_space as usize) - &b_size;
 
         // Fill data in (or return None if it doesn't fit)
-        if &remaining_space >= &b_size{
+        if &remaining_space >= &b_size {
             self.data[*&start..*&(&start + &b_size)].clone_from_slice(&bytes);
         } else {
             return None;
@@ -73,16 +72,22 @@ impl Page {
         // Update metadata
         let mut s_id_offset = head_end;
         let next_copy = *&self.next_s_id;
-        if &self.highest_s_id == &self.next_s_id{
+        if &self.highest_s_id == &self.next_s_id {
             self.highest_s_id += 1;
             self.next_s_id += 1;
         } else {
             s_id_offset = self.get_slot_offset(self.next_s_id);
-            self.next_s_id = u16::from_be_bytes(self.data[s_id_offset..(s_id_offset+2)].try_into().unwrap());
+            self.next_s_id = u16::from_be_bytes(
+                self.data[s_id_offset..(s_id_offset + 2)]
+                    .try_into()
+                    .unwrap(),
+            );
         }
         self.data[s_id_offset..(s_id_offset + 2)].clone_from_slice(&next_copy.to_be_bytes());
-        self.data[(&s_id_offset + 2)..(&s_id_offset + 4)].clone_from_slice(&(*&b_size as u16).to_be_bytes());
-        self.data[(&s_id_offset + 4)..(&s_id_offset + 6)].clone_from_slice(&(*&start as u16).to_be_bytes());
+        self.data[(&s_id_offset + 2)..(&s_id_offset + 4)]
+            .clone_from_slice(&(*&b_size as u16).to_be_bytes());
+        self.data[(&s_id_offset + 4)..(&s_id_offset + 6)]
+            .clone_from_slice(&(*&start as u16).to_be_bytes());
         self.end_of_used_space = start as u16;
         return Some(next_copy);
     }
@@ -90,13 +95,19 @@ impl Page {
     /// Return the bytes for the slotId. If the slotId is not valid then return None
     pub fn get_value(&self, slot_id: SlotId) -> Option<Vec<u8>> {
         let size_start = self.get_slot_offset(slot_id) + 2;
-        let slot_size = u16::from_be_bytes(self.data[size_start..size_start+2].try_into().unwrap());
-        if u16::from_be_bytes(self.data[size_start-2..size_start].try_into().unwrap()) as SlotId != slot_id{
+        let slot_size =
+            u16::from_be_bytes(self.data[size_start..size_start + 2].try_into().unwrap());
+        if u16::from_be_bytes(self.data[size_start - 2..size_start].try_into().unwrap()) as SlotId
+            != slot_id
+        {
             return None;
         }
-        let offset = u16::from_be_bytes(self.data[size_start+2..size_start+4].try_into().unwrap());
-        return Some(self.data[offset as usize..offset as usize +slot_size as usize].to_vec());
-
+        let offset = u16::from_be_bytes(
+            self.data[size_start + 2..size_start + 4]
+                .try_into()
+                .unwrap(),
+        );
+        return Some(self.data[offset as usize..offset as usize + slot_size as usize].to_vec());
     }
 
     /// Delete the bytes/slot for the slotId. If the slotId is not valid then return None
@@ -105,30 +116,44 @@ impl Page {
     /// HINT: Return Some(()) for a valid delete
     pub fn delete_value(&mut self, slot_id: SlotId) -> Option<()> {
         let slot_start = self.get_slot_offset(slot_id);
-        let id = u16::from_be_bytes(self.data[slot_start..slot_start+2].try_into().unwrap()) as SlotId;
-        if slot_id >= self.highest_s_id || id != slot_id{
+        let id =
+            u16::from_be_bytes(self.data[slot_start..slot_start + 2].try_into().unwrap()) as SlotId;
+        if slot_id >= self.highest_s_id || id != slot_id {
             return None;
         };
-        let size = u16::from_be_bytes(self.data[slot_start+2..slot_start+4].try_into().unwrap());
-        let offset = u16::from_be_bytes(self.data[slot_start+4..slot_start+6].try_into().unwrap());
-        
+        let size = u16::from_be_bytes(
+            self.data[slot_start + 2..slot_start + 4]
+                .try_into()
+                .unwrap(),
+        );
+        let offset = u16::from_be_bytes(
+            self.data[slot_start + 4..slot_start + 6]
+                .try_into()
+                .unwrap(),
+        );
+
         // Compress data
         let moving_data = self.data[self.end_of_used_space as usize..offset as usize].to_vec();
-        self.data[(&self.end_of_used_space+size) as usize..(offset+size) as usize].clone_from_slice(&moving_data);
-        
+        self.data[(&self.end_of_used_space + size) as usize..(offset + size) as usize]
+            .clone_from_slice(&moving_data);
+
         // Update metadata
         let mut current_offset = self.get_slot_offset(0) + 4;
         while current_offset < self.get_header_size() {
-            let offset_value = u16::from_be_bytes(self.data[current_offset..current_offset+2].try_into().unwrap());
-            if offset_value < offset{
-                self.data[(current_offset as usize)..(current_offset as usize + 2)].clone_from_slice(&(u16::to_be_bytes(offset_value+&size)));
+            let offset_value = u16::from_be_bytes(
+                self.data[current_offset..current_offset + 2]
+                    .try_into()
+                    .unwrap(),
+            );
+            if offset_value < offset {
+                self.data[(current_offset as usize)..(current_offset as usize + 2)]
+                    .clone_from_slice(&(u16::to_be_bytes(offset_value + &size)));
             };
             current_offset += RECORD_METADATA_SIZE;
         }
-        self.data[slot_start..slot_start+2].clone_from_slice(&(u16::to_be_bytes(self.next_s_id)));
+        self.data[slot_start..slot_start + 2].clone_from_slice(&(u16::to_be_bytes(self.next_s_id)));
         self.next_s_id = slot_id;
-        return Some(())
-        
+        return Some(());
     }
 
     /// Create a new page from the byte array.
@@ -142,7 +167,7 @@ impl Page {
             highest_s_id: SlotId::from_be_bytes(data[2..4].try_into().unwrap()),
             next_s_id: SlotId::from_be_bytes(data[4..6].try_into().unwrap()),
             end_of_used_space: u16::from_be_bytes(data[6..8].try_into().unwrap()),
-            data: [0u8;PAGE_SIZE],
+            data: [0u8; PAGE_SIZE],
         };
         p.data.clone_from_slice(&data[0..PAGE_SIZE]);
         return p;
@@ -154,7 +179,7 @@ impl Page {
     /// HINT: To convert a vec of bytes using little endian, use
     /// to_le_bytes().to_vec()
     pub fn get_bytes(&self) -> Vec<u8> {
-        let mut d = [0u8;PAGE_SIZE];
+        let mut d = [0u8; PAGE_SIZE];
         d.clone_from_slice(&self.data[0..PAGE_SIZE]);
         d[2..4].clone_from_slice(&self.next_s_id.to_be_bytes());
         d[4..6].clone_from_slice(&self.highest_s_id.to_be_bytes());
@@ -163,7 +188,7 @@ impl Page {
     }
 
     /// A utility function to return the offset to get to a slot in the header
-    pub fn get_slot_offset(&self,slot_id: SlotId) -> usize {
+    pub fn get_slot_offset(&self, slot_id: SlotId) -> usize {
         GENERAL_METADATA_SIZE + (RECORD_METADATA_SIZE * slot_id as usize)
     }
 
@@ -187,8 +212,8 @@ impl Page {
 /// This should iterate through all valid values of the page.
 /// See https://stackoverflow.com/questions/30218886/how-to-implement-iterator-and-intoiterator-for-a-simple-struct
 pub struct PageIter {
-    //TODO milestone pg
-     
+    page: Page,
+    index: usize,
 }
 
 /// The implementation of the (consuming) page iterator.
@@ -196,7 +221,43 @@ impl Iterator for PageIter {
     type Item = Vec<u8>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        panic!("TODO milestone pg");
+        if self.index as u16 == self.page.highest_s_id {
+            return None;
+        };
+
+        let mut slot_offset = self.page.get_slot_offset(self.index as u16);
+        let mut slot_id = u16::from_be_bytes(
+            self.page.data[slot_offset + 2..slot_offset + 4]
+                .try_into()
+                .unwrap(),
+        );
+
+        while (self.index as u16) != slot_id {
+            self.index += 1;
+            if self.index as u16 == self.page.highest_s_id {
+                return None;
+            };
+            slot_offset = self.page.get_slot_offset(self.index as u16);
+            slot_id = u16::from_be_bytes(
+                self.page.data[slot_offset + 2..slot_offset + 4]
+                    .try_into()
+                    .unwrap(),
+            );
+        }
+
+        let size = u16::from_be_bytes(
+            self.page.data[slot_offset + 2..slot_offset + 4]
+                .try_into()
+                .unwrap(),
+        );
+        let offset = u16::from_be_bytes(
+            self.page.data[slot_offset + 4..slot_offset + 6]
+                .try_into()
+                .unwrap(),
+        );
+        let result: Vec<u8> = self.page.data[offset as usize..(offset + size) as usize].to_vec();
+        self.index += 1;
+        return Some(result);
     }
 }
 
@@ -208,7 +269,10 @@ impl IntoIterator for Page {
     type IntoIter = PageIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        panic!("TODO milestone pg");
+        PageIter {
+            page: self,
+            index: 0,
+        }
     }
 }
 
