@@ -213,7 +213,7 @@ impl Page {
 /// See https://stackoverflow.com/questions/30218886/how-to-implement-iterator-and-intoiterator-for-a-simple-struct
 pub struct PageIter {
     page: Page,
-    index: usize,
+    index: SlotId,
 }
 
 /// The implementation of the (consuming) page iterator.
@@ -221,28 +221,20 @@ impl Iterator for PageIter {
     type Item = Vec<u8>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index as u16 == self.page.highest_s_id {
+        if self.index >= self.page.highest_s_id {
             return None;
         };
 
         let mut slot_offset = self.page.get_slot_offset(self.index as u16);
         let mut slot_id = u16::from_be_bytes(
-            self.page.data[slot_offset + 2..slot_offset + 4]
+            self.page.data[(slot_offset)..(slot_offset + 2)]
                 .try_into()
                 .unwrap(),
         );
 
-        while (self.index as u16) != slot_id {
+        if (self.index) != slot_id {
             self.index += 1;
-            if self.index as u16 == self.page.highest_s_id {
-                return None;
-            };
-            slot_offset = self.page.get_slot_offset(self.index as u16);
-            slot_id = u16::from_be_bytes(
-                self.page.data[slot_offset + 2..slot_offset + 4]
-                    .try_into()
-                    .unwrap(),
-            );
+            return self.next();
         }
 
         let size = u16::from_be_bytes(
@@ -642,7 +634,6 @@ mod tests {
         assert_eq!(Some(tuple_bytes3.clone()), iter.next());
         assert_eq!(Some(tuple_bytes4.clone()), iter.next());
         assert_eq!(None, iter.next());
-
         //Check another way
         let p = Page::from_bytes(&page_bytes);
         assert_eq!(Some(tuple_bytes.clone()), p.get_value(0));
