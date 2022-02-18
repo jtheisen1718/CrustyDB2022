@@ -17,7 +17,7 @@ use std::io::{Seek, SeekFrom};
 ///
 /// HINT: You will probably not be able to serialize HeapFile, as it needs to maintain a link to a
 /// File object, which cannot be serialized/deserialized/skipped by serde. You don't need to worry
-/// about persisting read_count/write_count during serialization. 
+/// about persisting read_count/write_count during serialization.
 ///
 /// Your code should persist what information is needed to recreate the heapfile.
 ///
@@ -32,7 +32,7 @@ pub(crate) struct HeapFile {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct SerializableHeapFile{
+pub struct SerializableHeapFile {
     pub file_path: String,
     pub page_ids: Vec<PageId>,
 }
@@ -59,8 +59,6 @@ impl HeapFile {
             }
         };
 
-        
-
         Ok(HeapFile {
             // TODO milestone hs init your new field(s)
             f: Arc::new(RwLock::new(file)),
@@ -75,7 +73,7 @@ impl HeapFile {
     /// Return type is PageId (alias for another type) as we cannot have more
     /// pages than PageId can hold.
     pub fn num_pages(&self) -> PageId {
-        return self.page_ids.read().unwrap().len() as PageId
+        return self.page_ids.read().unwrap().len() as PageId;
     }
 
     /// Read the page from the file.
@@ -88,17 +86,28 @@ impl HeapFile {
         }
 
         if !(self.page_ids.read().unwrap().contains(&pid)) {
-            return Err(CrustyError::CrustyError(format!("Invalid pageID: {}",&pid)))
+            return Err(CrustyError::CrustyError(format!(
+                "Invalid pageID: {}",
+                &pid
+            )));
         };
 
         let mut buffer: [u8; PAGE_SIZE] = [0; PAGE_SIZE];
         let index;
         {
-            index = self.page_ids.read().unwrap().iter().position(|&r| r == pid).unwrap();
+            index = self
+                .page_ids
+                .read()
+                .unwrap()
+                .iter()
+                .position(|&r| r == pid)
+                .unwrap();
         }
-        let mut file = self.f.write().unwrap();
-        file.seek(SeekFrom::Start((index * PAGE_SIZE).try_into().unwrap()));
-        file.read(&mut buffer);
+        {
+            let mut file = self.f.write().unwrap();
+            file.seek(SeekFrom::Start((index * PAGE_SIZE).try_into().unwrap()));
+            file.read(&mut buffer);
+        }
         let page = Page::from_bytes(&buffer);
         return Ok(page);
     }
@@ -113,10 +122,12 @@ impl HeapFile {
         }
 
         let page_bytes: &[u8] = &&(page.get_bytes());
-        let mut file = self.f.write().unwrap();
-        file.write(page_bytes);
+        {
+            let mut file = self.f.write().unwrap();
+            file.write(page_bytes);
+        }
         self.page_ids.write().unwrap().push(page.p_id);
-        return Ok(())
+        return Ok(());
     }
 }
 

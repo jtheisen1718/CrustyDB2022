@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
 use std::io::Read;
+use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use crate::database_state::DatabaseState;
@@ -107,9 +107,11 @@ impl ServerState {
             let filepath = format!("{}/databases", self.storage_path);
             fs::create_dir_all(&filepath)?;
             let filename = format!("{}/{}", filepath, name);
-            serde_json::to_writer(fs::File::create(filename).expect("error creating file"),
-                                  &dbstate.database)
-                .expect("error deserializing db");
+            serde_json::to_writer(
+                fs::File::create(filename).expect("error creating file"),
+                &dbstate.database,
+            )
+            .expect("error deserializing db");
         }
 
         let mut workers = self.workers.lock().unwrap();
