@@ -22,10 +22,10 @@ pub struct HeapFileIterator {
 impl HeapFileIterator {
     /// Create a new HeapFileIterator that stores the container_id, tid, and heapFile pointer.
     /// This should initialize the state required to iterate through the heap file.
-    pub(crate) fn new(container_id: ContainerId, tid: TransactionId, hf: Arc<HeapFile>) -> Self {
+    pub(crate) fn new(_container_id: ContainerId, _tid: TransactionId, hf: Arc<HeapFile>) -> Self {
         if hf.num_pages() == 0 {
             return HeapFileIterator {
-                hf: hf,
+                hf,
                 page_index: 0,
                 page_iter: Page::new(0).into_iter(),
             };
@@ -35,11 +35,11 @@ impl HeapFileIterator {
             let p_ids = hf.page_ids.read().unwrap();
             page = hf.read_page_from_file(p_ids[0]).unwrap();
         }
-        return HeapFileIterator {
-            hf: hf,
+        HeapFileIterator {
+            hf,
             page_index: 0,
             page_iter: page.into_iter(),
-        };
+        }
     }
 }
 
@@ -66,6 +66,6 @@ impl Iterator for HeapFileIterator {
             self.page_iter = page.into_iter();
             return self.next();
         };
-        return this;
+        this
     }
 }

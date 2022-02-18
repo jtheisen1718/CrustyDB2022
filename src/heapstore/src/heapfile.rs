@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, RwLock};
 
-use std::io::BufWriter;
+
 use std::io::{Seek, SeekFrom};
 
 /// The struct for a heap file.  
@@ -53,7 +53,7 @@ impl HeapFile {
                 return Err(CrustyError::CrustyError(format!(
                     "Cannot open or create heap file: {} {} {:?}",
                     file_path.to_string_lossy(),
-                    error.to_string(),
+                    error,
                     error
                 )))
             }
@@ -104,12 +104,12 @@ impl HeapFile {
                 .unwrap();
         }
         {
-            let mut file = self.f.write().unwrap();
+            let mut file = self.f.try_write().unwrap();
             file.seek(SeekFrom::Start((index * PAGE_SIZE).try_into().unwrap()));
             file.read(&mut buffer);
         }
         let page = Page::from_bytes(&buffer);
-        return Ok(page);
+        Ok(page)
     }
 
     /// Take a page and write it to the underlying file.
@@ -121,13 +121,16 @@ impl HeapFile {
             self.write_count.fetch_add(1, Ordering::Relaxed);
         }
 
-        let page_bytes: &[u8] = &&(page.get_bytes());
+        let page_bytes: &[u8] = &(page.get_bytes());
         {
-            let mut file = self.f.write().unwrap();
+            let mut file = self.f.try_write().unwrap();
             file.write(page_bytes);
         }
-        self.page_ids.write().unwrap().push(page.p_id);
-        return Ok(());
+        let mut p_ids = self.page_ids.try_write().unwrap();
+        if !p_ids.contains(&page.p_id){
+            p_ids.push(page.p_id)
+        }
+        Ok(())
     }
 }
 

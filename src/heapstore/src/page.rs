@@ -1,7 +1,7 @@
 use common::ids::{PageId, SlotId};
 use common::PAGE_SIZE;
 use std::convert::TryInto;
-use std::mem;
+
 
 pub const GENERAL_METADATA_SIZE: usize = 8;
 pub const RECORD_METADATA_SIZE: usize = 6;
@@ -36,12 +36,12 @@ impl Page {
             data: [0; PAGE_SIZE],
         };
         p.data[0..2].clone_from_slice(&p.p_id.to_be_bytes());
-        return p;
+        p
     }
 
     /// Return the page id for a page
     pub fn get_page_id(&self) -> PageId {
-        return self.p_id;
+        self.p_id
     }
 
     /// Attempts to add a new value to this page if there is space available.
@@ -64,14 +64,14 @@ impl Page {
 
         // Fill data in (or return None if it doesn't fit)
         if &remaining_space >= &b_size {
-            self.data[*&start..*&(&start + &b_size)].clone_from_slice(&bytes);
+            self.data[start..(&start + &b_size)].clone_from_slice(bytes);
         } else {
             return None;
         }
 
         // Update metadata
         let mut s_id_offset = head_end;
-        let next_copy = *&self.next_s_id;
+        let next_copy = self.next_s_id;
         if &self.highest_s_id == &self.next_s_id {
             self.highest_s_id += 1;
             self.next_s_id += 1;
@@ -85,11 +85,11 @@ impl Page {
         }
         self.data[s_id_offset..(s_id_offset + 2)].clone_from_slice(&next_copy.to_be_bytes());
         self.data[(&s_id_offset + 2)..(&s_id_offset + 4)]
-            .clone_from_slice(&(*&b_size as u16).to_be_bytes());
+            .clone_from_slice(&(b_size as u16).to_be_bytes());
         self.data[(&s_id_offset + 4)..(&s_id_offset + 6)]
-            .clone_from_slice(&(*&start as u16).to_be_bytes());
+            .clone_from_slice(&(start as u16).to_be_bytes());
         self.end_of_used_space = start as u16;
-        return Some(next_copy);
+        Some(next_copy)
     }
 
     /// Return the bytes for the slotId. If the slotId is not valid then return None
@@ -107,7 +107,7 @@ impl Page {
                 .try_into()
                 .unwrap(),
         );
-        return Some(self.data[offset as usize..offset as usize + slot_size as usize].to_vec());
+        Some(self.data[offset as usize..offset as usize + slot_size as usize].to_vec())
     }
 
     /// Delete the bytes/slot for the slotId. If the slotId is not valid then return None
@@ -153,7 +153,7 @@ impl Page {
         }
         self.data[slot_start..slot_start + 2].clone_from_slice(&(u16::to_be_bytes(self.next_s_id)));
         self.next_s_id = slot_id;
-        return Some(());
+        Some(())
     }
 
     /// Create a new page from the byte array.
@@ -170,7 +170,7 @@ impl Page {
             data: [0u8; PAGE_SIZE],
         };
         p.data.clone_from_slice(&data[0..PAGE_SIZE]);
-        return p;
+        p
     }
 
     /// Convert a page into bytes. This must be same size as PAGE_SIZE.
@@ -184,7 +184,7 @@ impl Page {
         d[2..4].clone_from_slice(&self.next_s_id.to_be_bytes());
         d[4..6].clone_from_slice(&self.highest_s_id.to_be_bytes());
         d[6..8].clone_from_slice(&self.end_of_used_space.to_be_bytes());
-        return d.to_vec();
+        d.to_vec()
     }
 
     /// A utility function to return the offset to get to a slot in the header
@@ -204,7 +204,7 @@ impl Page {
     /// Will be used by tests. Optional for you to use in your code
     #[allow(dead_code)]
     pub(crate) fn get_largest_free_contiguous_space(&self) -> usize {
-        *&self.end_of_used_space as usize - &self.get_header_size()
+        self.end_of_used_space as usize - &self.get_header_size()
     }
 }
 
@@ -249,7 +249,7 @@ impl Iterator for PageIter {
         );
         let result: Vec<u8> = self.page.data[offset as usize..(offset + size) as usize].to_vec();
         self.index += 1;
-        return Some(result);
+        Some(result)
     }
 }
 
@@ -492,7 +492,7 @@ mod tests {
     #[test]
     fn hs_page_get_first_free_space() {
         init();
-        let mut p = Page::new(0);
+        let _p = Page::new(0);
 
         let _b1 = get_random_byte_vec(100);
         let _b2 = get_random_byte_vec(50);

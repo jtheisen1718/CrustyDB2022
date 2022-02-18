@@ -6,12 +6,12 @@ use common::prelude::*;
 use common::storage_trait::StorageTrait;
 use common::testutil::gen_random_dir;
 use common::PAGE_SIZE;
-use serde_json::json;
+
 use std::collections::HashMap;
 use std::fs;
 use std::io::BufReader;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock};
 
@@ -36,12 +36,12 @@ impl StorageManager {
         _perm: Permissions,
         _pin: bool,
     ) -> Option<Page> {
-        match self.containers.write().unwrap().get(&container_id) {
+        match self.containers.read().unwrap().get(&container_id) {
             Some(h) => match h.read_page_from_file(page_id) {
-                Ok(p) => return Some(p),
-                _ => return None,
+                Ok(p) => Some(p),
+                _ => None,
             },
-            None => return None,
+            None => None,
         }
     }
 
@@ -52,10 +52,11 @@ impl StorageManager {
         page: Page,
         _tid: TransactionId,
     ) -> Result<(), CrustyError> {
-        match self.containers.write().unwrap().get(&container_id) {
-            Some(h) => return h.write_page_to_file(page),
+        let containers = self.containers.try_write().unwrap();
+        match containers.get(&container_id) {
+            Some(h) => h.write_page_to_file(page),
             None => {
-                return Err(common::CrustyError::CrustyError(
+                Err(common::CrustyError::CrustyError(
                     "Invalid container_id".to_string(),
                 ))
             }
@@ -65,7 +66,7 @@ impl StorageManager {
     /// Get the number of pages for a container
     fn get_num_pages(&self, container_id: ContainerId) -> PageId {
         match self.containers.read().unwrap().get(&container_id) {
-            Some(h) => return h.num_pages(),
+            Some(h) => h.num_pages(),
             None => panic!("get_num_pages: Container did not exist!"),
         }
     }
@@ -97,11 +98,11 @@ impl StorageTrait for StorageManager {
         metadata_path.push("metadata");
 
         if !metadata_path.exists() {
-            return StorageManager {
-                storage_path: storage_path,
+            StorageManager {
+                storage_path,
                 is_temp: false,
                 containers: Arc::new(RwLock::new(HashMap::new())),
-            };
+            }
         } else {
             // Deserialize
             let metadata = fs::OpenOptions::new()
@@ -120,11 +121,11 @@ impl StorageTrait for StorageManager {
                 hf.page_ids = RwLock::new(dehf.page_ids.clone());
                 heapfiles.insert(*cid, Arc::new(hf));
             }
-            return StorageManager {
+            StorageManager {
                 containers: Arc::new(RwLock::new(heapfiles)),
-                storage_path: storage_path,
+                storage_path,
                 is_temp: false,
-            };
+            }
         }
     }
 
@@ -135,7 +136,7 @@ impl StorageTrait for StorageManager {
         debug!("Making new temp storage_manager {}", storage_path);
         std::fs::create_dir_all(&storage_path);
         StorageManager {
-            storage_path: storage_path,
+            storage_path,
             is_temp: true,
             containers: Arc::new(RwLock::new(HashMap::new())),
         }
@@ -158,33 +159,46 @@ impl StorageTrait for StorageManager {
     ) -> ValueId {
         if value.len() > PAGE_SIZE {
             panic!("Cannot handle inserting a value larger than the page size");
-        }
-        let containers = self.containers.write().unwrap();
-        let heapfile = containers.get(&container_id).unwrap();
-        let p_ids = heapfile.page_ids.write().unwrap();
+        }        
+        let mut space_available = false;
+        let mut modified_v_id = ValueId::new(container_id);
+        let mut modified_page = Page::new(0);
+        let mut new_v_id = ValueId::new(container_id);
+        let mut new_page = Page::new(0);
 
-        for p_id in p_ids.iter() {
-            let mut page = heapfile.read_page_from_file(*p_id).unwrap();
-            if page.get_largest_free_contiguous_space() - 6 >= value.len() {
-                let mut v_id = ValueId::new(container_id);
-                v_id.page_id = Some(page.get_page_id());
-                v_id.slot_id = page.add_value(&&value);
-                self.write_page(container_id, page, tid);
-                return v_id;
+        {
+            let containers = self.containers.read().unwrap();
+            let heapfile = containers.get(&container_id).unwrap();
+            let p_ids = heapfile.page_ids.read().unwrap().to_vec();
+
+            for p_id in p_ids.iter() {
+                let mut page = heapfile.read_page_from_file(*p_id).unwrap();
+                if page.get_largest_free_contiguous_space() - 6 >= value.len() {
+                    modified_v_id.page_id = Some(page.get_page_id());
+                    modified_v_id.slot_id = page.add_value(&value);
+                    space_available = true;
+                    modified_page = page;
+                    break;
+                }
             }
+            let p_id: PageId;
+            if p_ids.len() == 0 {
+                p_id = 0;
+            } else {
+                p_id = p_ids[p_ids.len() - 1] + 1;
+            }
+            let mut page = Page::new(p_id);
+            new_v_id.page_id = Some(page.get_page_id());
+            new_v_id.slot_id = page.add_value(&value);
+            new_page = page;
         }
-        let p_id: PageId;
-        if p_ids.len() == 0 {
-            p_id = 0;
+        if space_available {
+            self.write_page(container_id, modified_page, tid);
+            return modified_v_id;
         } else {
-            p_id = p_ids[p_ids.len() - 1] + 1;
+            self.write_page(container_id,new_page, tid);
+            return new_v_id;
         }
-        let mut v_id = ValueId::new(container_id);
-        let mut page = Page::new(p_id);
-        v_id.page_id = Some(page.get_page_id());
-        v_id.slot_id = page.add_value(&value);
-        self.write_page(container_id, page, tid);
-        return v_id;
     }
 
     /// Insert some bytes into a container for vector of values (e.g. record).
@@ -200,17 +214,17 @@ impl StorageTrait for StorageManager {
         for val in values.iter() {
             value_ids.push(self.insert_value(container_id, val.to_vec(), tid));
         }
-        return value_ids;
+        value_ids
     }
 
     /// Delete the data for a value. If the valueID is not found it returns Ok() still.
-    fn delete_value(&self, id: ValueId, tid: TransactionId) -> Result<(), CrustyError> {
-        match self.containers.write().unwrap().get(&id.container_id) {
+    fn delete_value(&self, id: ValueId, _tid: TransactionId) -> Result<(), CrustyError> {
+        match self.containers.try_write().unwrap().get(&id.container_id) {
             Some(hf) => {
                 let mut page = hf.read_page_from_file(id.page_id.unwrap()).unwrap();
                 page.delete_value(id.slot_id.unwrap());
                 hf.write_page_to_file(page);
-                return Ok(());
+                Ok(())
             }
             None => panic!("Invalid Container Id"),
         }
@@ -226,7 +240,7 @@ impl StorageTrait for StorageManager {
         _tid: TransactionId,
     ) -> Result<ValueId, CrustyError> {
         self.delete_value(id, _tid);
-        return Ok(self.insert_value(id.container_id, value, _tid));
+        Ok(self.insert_value(id.container_id, value, _tid))
     }
 
     /// Create a new container to be stored.
@@ -251,10 +265,10 @@ impl StorageTrait for StorageManager {
         path.push(format!("heapfile{}", container_id));
         let heapfile = Arc::new(HeapFile::new(path).unwrap());
         self.containers
-            .write()
+            .try_write()
             .unwrap()
             .insert(container_id, heapfile);
-        return Ok(());
+        Ok(())
     }
 
     /// A wrapper function to call create container
@@ -271,11 +285,11 @@ impl StorageTrait for StorageManager {
     /// Remove the container and all stored values in the container.
     /// If the container is persisted remove the underlying files
     fn remove_container(&self, container_id: ContainerId) -> Result<(), CrustyError> {
-        let mut containers = self.containers.write().unwrap();
+        let mut containers = self.containers.try_write().unwrap();
         match fs::remove_file(format!("heapfile{}", container_id)) {
             Ok(_) => {
                 containers.remove(&container_id);
-                return Ok(());
+                Ok(())
             }
             _ => {
                 return Err(common::CrustyError::CrustyError(format!(
@@ -295,23 +309,23 @@ impl StorageTrait for StorageManager {
     ) -> Self::ValIterator {
         let containers = self.containers.read().unwrap();
         let hf = containers.get(&container_id).unwrap();
-        return HeapFileIterator::new(container_id, tid, Arc::clone(hf));
+        HeapFileIterator::new(container_id, tid, Arc::clone(hf))
     }
 
     /// Get the data for a particular ValueId. Error if does not exists
     fn get_value(
         &self,
         id: ValueId,
-        tid: TransactionId,
-        perm: Permissions,
+        _tid: TransactionId,
+        _perm: Permissions,
     ) -> Result<Vec<u8>, CrustyError> {
         match self.containers.read().unwrap().get(&id.container_id) {
             Some(hf) => {
                 let page = hf.read_page_from_file(id.page_id.unwrap()).unwrap();
-                return Ok(page.get_value(id.slot_id.unwrap()).unwrap());
+                Ok(page.get_value(id.slot_id.unwrap()).unwrap())
             }
             _ => {
-                return Err(common::CrustyError::CrustyError(
+                Err(common::CrustyError::CrustyError(
                     "Invalid container id".to_string(),
                 ))
             }
@@ -319,16 +333,16 @@ impl StorageTrait for StorageManager {
     }
 
     /// Notify the storage manager that the transaction is finished so that any held resources can be released.
-    fn transaction_finished(&self, tid: TransactionId) {
+    fn transaction_finished(&self, _tid: TransactionId) {
         panic!("TODO milestone tm");
     }
 
     /// Testing utility to reset all state associated the storage manager.
     fn reset(&self) -> Result<(), CrustyError> {
-        let mut containers = self.containers.write().unwrap();
+        let mut containers = self.containers.try_write().unwrap();
         containers.clear();
         fs::remove_dir_all(self.storage_path.clone()).unwrap();
-        return Ok(());
+        Ok(())
     }
 
     /// If there is a buffer pool or cache it should be cleared/reset.
@@ -365,7 +379,7 @@ impl StorageTrait for StorageManager {
             }
             serde_json::to_writer(metadata, &ser_heapfiles);
         }
-        self.containers.write().unwrap().clear();
+        self.containers.try_write().unwrap().clear();
         drop(self);
     }
 
@@ -455,10 +469,9 @@ mod test {
         let sm = StorageManager::new_test_sm();
         let cid = 1;
         sm.create_table(cid);
-
         let bytes = get_random_byte_vec(40);
         let tid = TransactionId::new();
-
+        
         let val1 = sm.insert_value(cid, bytes.clone(), tid);
         assert_eq!(1, sm.get_num_pages(cid));
         assert_eq!(0, val1.page_id.unwrap());
