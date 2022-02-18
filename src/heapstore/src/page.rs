@@ -225,8 +225,8 @@ impl Iterator for PageIter {
             return None;
         };
 
-        let mut slot_offset = self.page.get_slot_offset(self.index as u16);
-        let mut slot_id = u16::from_be_bytes(
+        let slot_offset = self.page.get_slot_offset(self.index as u16);
+        let slot_id = u16::from_be_bytes(
             self.page.data[(slot_offset)..(slot_offset + 2)]
                 .try_into()
                 .unwrap(),

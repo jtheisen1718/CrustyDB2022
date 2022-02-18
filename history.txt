@@ -1,0 +1,31 @@
+#V2
+\\l
+\\r test1
+\\l
+\\dt
+\\c test1
+CREATE TABLE test (a INT, b INT, primary key (a));
+\\i ./data.csv test
+\\l
+select * from test
+select a from test
+\\d
+select * from test
+select a from test
+\\q
+\\close
+\\reset
+\\l
+\\r testdb
+\\c testdb
+CREATE TABLE test (a INT, b INT, primary key (a));
+\\i ./data.csv test
+select a from test;
+select * from test;
+select test.a from test
+select sum(test.a), sum(test.b) from test;
+\\reset
+\\reset;
+\\close;
+\\close
+\\reset

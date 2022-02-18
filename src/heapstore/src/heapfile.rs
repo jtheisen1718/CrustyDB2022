@@ -52,7 +52,7 @@ impl HeapFile {
             }
         };
 
-        //let pids: Arc<Vec<PageId>> = Arc::new(Vec::new());
+        
 
         Ok(HeapFile {
             // TODO milestone hs init your new field(s)
@@ -68,11 +68,6 @@ impl HeapFile {
     /// pages than PageId can hold.
     pub fn num_pages(&self) -> PageId {
         return self.page_ids.read().unwrap().len() as PageId
-        /* let mut f = File::open(self.path)?;
-        let mut buffer = [0; self.header_size];
-
-        f.read(&mut buffer)?;
-        return PageId::from_be_bytes(buffer.try_into().unwrap()); */
     }
 
     /// Read the page from the file.
