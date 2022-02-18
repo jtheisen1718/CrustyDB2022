@@ -17,11 +17,11 @@ pub(crate) struct Page {
     /// The data for data
     /// Header: 8 + 6*slots bytes for metadata
     /// Body: PAGE_SIZE - Header
-    p_id: PageId,
-    highest_s_id: SlotId,
-    next_s_id: SlotId,
-    end_of_used_space: u16,
-    data: [u8; PAGE_SIZE],
+    pub p_id: PageId,
+    pub highest_s_id: SlotId,
+    pub next_s_id: SlotId,
+    pub end_of_used_space: u16,
+    pub data: [u8; PAGE_SIZE],
 }
 
 /// The functions required for page
