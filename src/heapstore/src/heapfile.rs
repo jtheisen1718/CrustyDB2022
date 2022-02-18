@@ -24,10 +24,17 @@ use std::io::{Seek, SeekFrom};
 pub(crate) struct HeapFile {
     // TODO milestone hs (add new fields)
     pub f: Arc<RwLock<File>>,
+    pub file_path: String,
     pub page_ids: RwLock<Vec<PageId>>,
     // The following are for profiling/ correctness checks
     pub read_count: AtomicU16,
     pub write_count: AtomicU16,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SerializableHeapFile{
+    pub file_path: String,
+    pub page_ids: Vec<PageId>,
 }
 
 /// HeapFile required functions
@@ -57,6 +64,7 @@ impl HeapFile {
         Ok(HeapFile {
             // TODO milestone hs init your new field(s)
             f: Arc::new(RwLock::new(file)),
+            file_path: file_path.to_str().unwrap().to_string(),
             page_ids: RwLock::new(Vec::new()),
             read_count: AtomicU16::new(0),
             write_count: AtomicU16::new(0),
@@ -84,7 +92,10 @@ impl HeapFile {
         };
 
         let mut buffer: [u8; PAGE_SIZE] = [0; PAGE_SIZE];
-        let index = self.page_ids.read().unwrap().iter().position(|&r| r == pid).unwrap();
+        let index;
+        {
+            index = self.page_ids.read().unwrap().iter().position(|&r| r == pid).unwrap();
+        }
         let mut file = self.f.write().unwrap();
         file.seek(SeekFrom::Start((index * PAGE_SIZE).try_into().unwrap()));
         file.read(&mut buffer);

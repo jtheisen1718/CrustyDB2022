@@ -1,4 +1,5 @@
 use crate::heapfile::HeapFile;
+use crate::heapfile::SerializableHeapFile;
 use crate::heapfileiter::HeapFileIterator;
 use crate::page::Page;
 use common::prelude::*;
@@ -8,6 +9,7 @@ use common::PAGE_SIZE;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
+use std::io::BufReader;
 use std::path::{PathBuf, Path};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock};
@@ -18,7 +20,7 @@ use serde_json::json;
 #[derive(Serialize, Deserialize)]
 pub struct StorageManager {
     #[serde(skip)]
-    containers: Arc<RwLock<HashMap<ContainerId, HeapFile>>>,
+    containers: Arc<RwLock<HashMap<ContainerId, Arc<HeapFile>>>>,
     /// Path to database metadata files.
     pub storage_path: String,
     is_temp: bool,
@@ -85,41 +87,47 @@ impl StorageTrait for StorageManager {
     /// Create a new storage manager that will use storage_path as the location to persist data
     /// (if the storage manager persists records on disk)
     fn new(storage_path: String) -> Self {
-        let mut p = PathBuf::from(&storage_path);
-        p.push("metadata");
-        /* if p.exists() {
-            let s = fs::read_to_string(p).unwrap();
-            let j = serde_json::to_value(s).unwrap();
-            let cs = HashMap::new();
-            let cids = Vec::new();
-            for serhf in j["heapfiles"]{
-                let jhf = serde_json::to_value(serhf).unwrap();
-                cids.push(jhf["container_id"]);
-                let mut hf = HeapFile::new(jhf["filepath"]).unwrap();
-                hf.page_ids = jhf["page_ids"];
-                cs.insert(jhf["container_id"],hf);
+        std::fs::create_dir_all(&storage_path);
+
+        let mut metadata_path = PathBuf::from(&storage_path);
+        metadata_path.push("metadata");
+
+        if !metadata_path.exists(){
+            return StorageManager {
+                storage_path: storage_path,
+                is_temp: false,
+                containers: Arc::new(RwLock::new(HashMap::new())),
+            };
+        } else {
+            // Deserialize
+            let metadata = fs::OpenOptions::new()
+                .read(true)
+                .write(false)
+                .create(false)
+                .open(&metadata_path).unwrap();    
+            let reader = BufReader::new(metadata);
+            let deser_heapfiles: HashMap<ContainerId, SerializableHeapFile> = serde_json::from_reader(reader).unwrap();
+            let mut heapfiles: HashMap<ContainerId, Arc<HeapFile>> = HashMap::new();
+            for cid in deser_heapfiles.keys(){
+                let dehf = deser_heapfiles.get(cid).unwrap();
+                let mut hf = HeapFile::new(PathBuf::from(&dehf.file_path)).unwrap();
+                hf.page_ids = RwLock::new(dehf.page_ids.clone());
+                heapfiles.insert(*cid,Arc::new(hf));
             }
             return StorageManager{
+                containers: Arc::new(RwLock::new(heapfiles)),
                 storage_path: storage_path,
-                is_temp:false,
-                containers: Arc::new(RwLock::new(cs)),
-                container_ids: Arc::new(RwLock::new(cids)),
+                is_temp: false,
             };
-        } */
-        std::fs::create_dir_all(&storage_path);
-        return StorageManager {
-            storage_path: storage_path,
-            is_temp: false,
-            containers: Arc::new(RwLock::new(HashMap::new())),
-        };
+        }
     }
     
     /// Create a new storage manager for testing. If this creates a temporary directory it should be cleaned up
     /// when it leaves scope.
     fn new_test_sm() -> Self {
         let storage_path = gen_random_dir().to_string_lossy().to_string();
-        std::fs::create_dir_all(&storage_path);
         debug!("Making new temp storage_manager {}", storage_path);
+        std::fs::create_dir_all(&storage_path);
         StorageManager {
             storage_path: storage_path,
             is_temp: true,
@@ -230,7 +238,7 @@ impl StorageTrait for StorageManager {
     ) -> Result<(), CrustyError> {
         let mut path = PathBuf::from(self.storage_path.clone());
         path.push(format!("heapfile{}",container_id));
-        let heapfile = HeapFile::new(path).unwrap();
+        let heapfile = Arc::new(HeapFile::new(path).unwrap());
         self.containers.write().unwrap().insert(container_id,heapfile);
         return Ok(());
     }
@@ -266,9 +274,9 @@ impl StorageTrait for StorageManager {
         tid: TransactionId,
         _perm: Permissions,
     ) -> Self::ValIterator {
-        let hf = self.containers.read().unwrap().get(&container_id).unwrap();
-        let ahf = Arc::new(*hf.clone());
-        return HeapFileIterator::new(container_id,tid,ahf);
+        let containers = self.containers.read().unwrap();
+        let hf = containers.get(&container_id).unwrap();
+        return HeapFileIterator::new(container_id,tid,Arc::clone(hf));
     }
 
     /// Get the data for a particular ValueId. Error if does not exists
@@ -312,41 +320,29 @@ impl StorageTrait for StorageManager {
     /// that can be used to create a HeapFile object pointing to the same data. You don't need to
     /// worry about recreating read_count or write_count.
     fn shutdown(&self) {
-        /* let mut metadata_path = PathBuf::from(self.storage_path.to_string());
+        let mut metadata_path = PathBuf::from(&self.storage_path);
         metadata_path.push("metadata");
-        let mut file = match fs::OpenOptions::new()
+
+        let metadata = fs::OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
-            .open(&self.storage_path)
+            .open(&metadata_path).unwrap();
         {
-            Ok(f) => f,
-            Err(error) => {
-                panic!(
-                    "Cannot open or create metadata file: {} {} {:?}",
-                    metadata_path.to_string_lossy(),
-                    error.to_string(),
-                    error
-                )
+            let mut ser_heapfiles: HashMap<ContainerId, SerializableHeapFile> = HashMap::new();
+            let containers = self.containers.read().unwrap();
+            for cid in containers.keys(){
+                let hf = containers.get(cid).unwrap();
+                let ser_hf = SerializableHeapFile{
+                    file_path: hf.file_path.clone(),
+                    page_ids: hf.page_ids.read().unwrap().to_vec(),
+                };
+                ser_heapfiles.insert(*cid,ser_hf);
             }
-        };
-        let mut heapfiles = Vec::new();
-        let containers = self.containers.read().unwrap();
-        for c_id in self.container_ids.read().unwrap().iter(){
-            let shf = json!({
-                "container_id": c_id,
-                "file_path": format!("heapfile{}",c_id),
-                "page_ids": (containers.get(c_id).unwrap().page_ids)
-            });
-            heapfiles.push(shf);
+            serde_json::to_writer(metadata,&ser_heapfiles);
         }
-        let ssm = json!({
-            "storage_path": self.storage_path,
-            "heapfiles": &&heapfiles
-        });
-        file.write(ssm.to_string().as_bytes()); */
-
-        drop(self)
+        self.containers.write().unwrap().clear();
+        drop(self);
     }
 
     fn import_csv(
