@@ -23,7 +23,8 @@ use std::io::{Seek, SeekFrom};
 ///
 pub(crate) struct HeapFile {
     // TODO milestone hs (add new fields)
-
+    pub f: Arc<RwLock<File>>,
+    pub page_ids: RwLock<Vec<PageId>>,
     // The following are for profiling/ correctness checks
     pub read_count: AtomicU16,
     pub write_count: AtomicU16,
@@ -51,10 +52,12 @@ impl HeapFile {
             }
         };
 
-        // TODO milestone hs
+        //let pids: Arc<Vec<PageId>> = Arc::new(Vec::new());
 
         Ok(HeapFile {
             // TODO milestone hs init your new field(s)
+            f: Arc::new(RwLock::new(file)),
+            page_ids: RwLock::new(Vec::new()),
             read_count: AtomicU16::new(0),
             write_count: AtomicU16::new(0),
         })
@@ -64,7 +67,12 @@ impl HeapFile {
     /// Return type is PageId (alias for another type) as we cannot have more
     /// pages than PageId can hold.
     pub fn num_pages(&self) -> PageId {
-        panic!("TODO milestone hs");
+        return self.page_ids.read().unwrap().len() as PageId
+        /* let mut f = File::open(self.path)?;
+        let mut buffer = [0; self.header_size];
+
+        f.read(&mut buffer)?;
+        return PageId::from_be_bytes(buffer.try_into().unwrap()); */
     }
 
     /// Read the page from the file.
@@ -75,7 +83,18 @@ impl HeapFile {
         {
             self.read_count.fetch_add(1, Ordering::Relaxed);
         }
-        panic!("TODO milestone hs");
+
+        if !(self.page_ids.read().unwrap().contains(&pid)) {
+            return Err(CrustyError::CrustyError(format!("Invalid pageID: {}",&pid)))
+        };
+
+        let mut buffer: [u8; PAGE_SIZE] = [0; PAGE_SIZE];
+        let index = self.page_ids.read().unwrap().iter().position(|&r| r == pid).unwrap();
+        let mut file = self.f.write().unwrap();
+        file.seek(SeekFrom::Start((index * PAGE_SIZE).try_into().unwrap()));
+        file.read(&mut buffer);
+        let page = Page::from_bytes(&buffer);
+        return Ok(page);
     }
 
     /// Take a page and write it to the underlying file.
@@ -86,7 +105,12 @@ impl HeapFile {
         {
             self.write_count.fetch_add(1, Ordering::Relaxed);
         }
-        panic!("TODO milestone hs");
+
+        let page_bytes: &[u8] = &&(page.get_bytes());
+        let mut file = self.f.write().unwrap();
+        file.write(page_bytes);
+        self.page_ids.write().unwrap().push(page.p_id);
+        return Ok(())
     }
 }
 
