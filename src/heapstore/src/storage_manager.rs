@@ -19,7 +19,6 @@ use serde_json::json;
 pub struct StorageManager {
     #[serde(skip)]
     containers: Arc<RwLock<HashMap<ContainerId, HeapFile>>>,
-    container_ids: Arc<RwLock<Vec<ContainerId>>>,
     /// Path to database metadata files.
     pub storage_path: String,
     is_temp: bool,
@@ -112,7 +111,6 @@ impl StorageTrait for StorageManager {
             storage_path: storage_path,
             is_temp: false,
             containers: Arc::new(RwLock::new(HashMap::new())),
-            container_ids: Arc::new(RwLock::new(Vec::new())),
         };
     }
     
@@ -126,7 +124,6 @@ impl StorageTrait for StorageManager {
             storage_path: storage_path,
             is_temp: true,
             containers: Arc::new(RwLock::new(HashMap::new())),
-            container_ids: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -235,7 +232,6 @@ impl StorageTrait for StorageManager {
         path.push(format!("heapfile{}",container_id));
         let heapfile = HeapFile::new(path).unwrap();
         self.containers.write().unwrap().insert(container_id,heapfile);
-        self.container_ids.write().unwrap().push(container_id);
         return Ok(());
     }
 
@@ -257,9 +253,6 @@ impl StorageTrait for StorageManager {
         match fs::remove_file(format!("heapfile{}",container_id)){
             Ok(_) => {
                 containers.remove(&container_id);
-                let mut container_ids = self.container_ids.write().unwrap();
-                let index = container_ids.iter().position(|x| *x == container_id).unwrap();
-                container_ids.remove(index);
                 return Ok(());
             },
             _ => return Err(common::CrustyError::CrustyError(format!("Failed to remove file: heapfile{}",container_id))),
@@ -273,10 +266,8 @@ impl StorageTrait for StorageManager {
         tid: TransactionId,
         _perm: Permissions,
     ) -> Self::ValIterator {
-        let containers = self.containers.write().unwrap();
-        let heapfile = containers.get(&container_id).unwrap();
-        let ch = &*heapfile.clone();
-        let ahf = Arc::new(*ch);
+        let hf = self.containers.read().unwrap().get(&container_id).unwrap();
+        let ahf = Arc::new(*hf.clone());
         return HeapFileIterator::new(container_id,tid,ahf);
     }
 
@@ -304,11 +295,7 @@ impl StorageTrait for StorageManager {
     /// Testing utility to reset all state associated the storage manager.
     fn reset(&self) -> Result<(), CrustyError> {
         let mut containers = self.containers.write().unwrap();
-        let mut container_ids = self.container_ids.write().unwrap();
-        for idx in 0..container_ids.len(){
-            containers.remove(&container_ids[idx]);
-            container_ids.remove(idx);
-        }
+        containers.clear();
         fs::remove_dir_all(self.storage_path.clone()).unwrap();
         return Ok(());
     }
@@ -325,7 +312,7 @@ impl StorageTrait for StorageManager {
     /// that can be used to create a HeapFile object pointing to the same data. You don't need to
     /// worry about recreating read_count or write_count.
     fn shutdown(&self) {
-        let mut metadata_path = PathBuf::from(self.storage_path.to_string());
+        /* let mut metadata_path = PathBuf::from(self.storage_path.to_string());
         metadata_path.push("metadata");
         let mut file = match fs::OpenOptions::new()
             .read(true)
@@ -357,7 +344,7 @@ impl StorageTrait for StorageManager {
             "storage_path": self.storage_path,
             "heapfiles": &&heapfiles
         });
-        file.write(ssm.to_string().as_bytes());
+        file.write(ssm.to_string().as_bytes()); */
 
         drop(self)
     }
