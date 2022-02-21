@@ -53,14 +53,10 @@ impl StorageManager {
         _tid: TransactionId,
     ) -> Result<(), CrustyError> {
         let containers = self.containers.try_write().unwrap();
-        match containers.get(&container_id) {
-            Some(h) => h.write_page_to_file(page),
-            None => {
-                Err(common::CrustyError::CrustyError(
-                    "Invalid container_id".to_string(),
-                ))
-            }
-        }
+        println!("write_page");
+        containers.get(&container_id).unwrap().write_page_to_file(page);
+        return Ok(());
+        
     }
 
     /// Get the number of pages for a container
@@ -159,12 +155,57 @@ impl StorageTrait for StorageManager {
     ) -> ValueId {
         if value.len() > PAGE_SIZE {
             panic!("Cannot handle inserting a value larger than the page size");
-        }        
+        } 
+        
+        let containers = self.containers.read().unwrap();
+        let heapfile = containers.get(&container_id).unwrap();
+        let p_ids = heapfile.page_ids.read().unwrap().to_vec();
+        let mut page_id: PageId = 0;
         let mut space_available = false;
+        let mut modified_page: Page = Page::new(111);
+
+        for p_id in p_ids.iter() {
+            let mut page = heapfile.read_page_from_file(*p_id).unwrap();
+            if page.get_largest_free_contiguous_space() - 6 >= value.len() {
+                space_available = true;
+                page_id = *p_id;
+                modified_page = Page::from_bytes(&page.get_bytes());
+                break;
+            } else {
+                page_id = *p_id + 1;
+            }
+        }
+        if space_available {
+            let mut v_id = ValueId::new(container_id);
+            v_id.page_id = Some(page_id);
+            v_id.slot_id = modified_page.add_value(&value);
+            drop(p_ids);
+            drop(heapfile);
+            drop(containers);
+            println!("Insert modified page {:?}", modified_page.highest_s_id);
+            self.write_page(container_id,modified_page, tid);
+            return v_id;
+        } else {
+            let mut v_id = ValueId::new(container_id);
+            v_id.page_id = Some(page_id);
+            let mut new_page = Page::new(page_id);
+            v_id.slot_id = new_page.add_value(&value);
+            drop(p_ids);
+            drop(heapfile);
+            drop(containers);
+            println!("Insert new page {:?}", v_id.slot_id);
+            self.write_page(container_id,new_page, tid);
+            return v_id;
+        }
+
+
+
+
+        /* let mut space_available = false;
         let mut modified_v_id = ValueId::new(container_id);
-        let mut modified_page = Page::new(0);
+        let mut modified_page = Page::new(111);
         let mut new_v_id = ValueId::new(container_id);
-        let mut new_page = Page::new(0);
+        let mut new_page = Page::new(2);
 
         {
             let containers = self.containers.read().unwrap();
@@ -193,12 +234,14 @@ impl StorageTrait for StorageManager {
             new_page = page;
         }
         if space_available {
+            println!("here {}",modified_page.get_page_id());
             self.write_page(container_id, modified_page, tid);
             return modified_v_id;
         } else {
-            self.write_page(container_id,new_page, tid);
+            println!("Here {}",new_page.get_page_id());
+            self.write_page(container_id, new_page, tid);
             return new_v_id;
-        }
+        } */
     }
 
     /// Insert some bytes into a container for vector of values (e.g. record).
@@ -485,7 +528,7 @@ mod test {
         assert_eq!(1, sm.get_num_pages(cid));
         assert_eq!(0, val2.page_id.unwrap());
         assert_eq!(1, val2.slot_id.unwrap());
-
+        
         let p2 = sm
             .get_page(cid, 0, tid, Permissions::ReadOnly, false)
             .unwrap();

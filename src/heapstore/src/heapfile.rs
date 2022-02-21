@@ -120,11 +120,12 @@ impl HeapFile {
         {
             self.write_count.fetch_add(1, Ordering::Relaxed);
         }
-
+        println!("Write_page_to_file {:?}", page.next_s_id);
         let page_bytes: &[u8] = &(page.get_bytes());
         {
             let mut file = self.f.try_write().unwrap();
             file.write(page_bytes);
+            println!("Written {}", page.next_s_id);
         }
         let mut p_ids = self.page_ids.try_write().unwrap();
         if !p_ids.contains(&page.p_id){
