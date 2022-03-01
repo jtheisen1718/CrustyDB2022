@@ -58,6 +58,9 @@ impl Page {
     pub fn add_value(&mut self, bytes: &[u8]) -> Option<SlotId> {
         let b_size: usize = bytes.len();
         let head_end = self.get_header_size();
+        if (self.end_of_used_space as usize) < (head_end + RECORD_METADATA_SIZE){
+            return None;
+        }
         let remaining_space: usize =
             self.end_of_used_space as usize - (head_end + RECORD_METADATA_SIZE);
         let start: usize = (self.end_of_used_space as usize) - &b_size;

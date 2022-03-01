@@ -53,7 +53,6 @@ impl StorageManager {
         _tid: TransactionId,
     ) -> Result<(), CrustyError> {
         let containers = self.containers.try_write().unwrap();
-        println!("write_page");
         containers.get(&container_id).unwrap().write_page_to_file(page);
         return Ok(());
         
@@ -166,7 +165,8 @@ impl StorageTrait for StorageManager {
 
         for p_id in p_ids.iter() {
             let mut page = heapfile.read_page_from_file(*p_id).unwrap();
-            if page.get_largest_free_contiguous_space() - 6 >= value.len() {
+            let free_space = page.get_largest_free_contiguous_space();
+            if (free_space > 6) && (free_space - 6) >= value.len() {
                 space_available = true;
                 page_id = *p_id;
                 modified_page = Page::from_bytes(&page.get_bytes());
@@ -182,7 +182,6 @@ impl StorageTrait for StorageManager {
             drop(p_ids);
             drop(heapfile);
             drop(containers);
-            println!("Insert modified page {:?}", modified_page.highest_s_id);
             self.write_page(container_id,modified_page, tid);
             return v_id;
         } else {
@@ -193,55 +192,9 @@ impl StorageTrait for StorageManager {
             drop(p_ids);
             drop(heapfile);
             drop(containers);
-            println!("Insert new page {:?}", v_id.slot_id);
             self.write_page(container_id,new_page, tid);
             return v_id;
         }
-
-
-
-
-        /* let mut space_available = false;
-        let mut modified_v_id = ValueId::new(container_id);
-        let mut modified_page = Page::new(111);
-        let mut new_v_id = ValueId::new(container_id);
-        let mut new_page = Page::new(2);
-
-        {
-            let containers = self.containers.read().unwrap();
-            let heapfile = containers.get(&container_id).unwrap();
-            let p_ids = heapfile.page_ids.read().unwrap().to_vec();
-
-            for p_id in p_ids.iter() {
-                let mut page = heapfile.read_page_from_file(*p_id).unwrap();
-                if page.get_largest_free_contiguous_space() - 6 >= value.len() {
-                    modified_v_id.page_id = Some(page.get_page_id());
-                    modified_v_id.slot_id = page.add_value(&value);
-                    space_available = true;
-                    modified_page = page;
-                    break;
-                }
-            }
-            let p_id: PageId;
-            if p_ids.len() == 0 {
-                p_id = 0;
-            } else {
-                p_id = p_ids[p_ids.len() - 1] + 1;
-            }
-            let mut page = Page::new(p_id);
-            new_v_id.page_id = Some(page.get_page_id());
-            new_v_id.slot_id = page.add_value(&value);
-            new_page = page;
-        }
-        if space_available {
-            println!("here {}",modified_page.get_page_id());
-            self.write_page(container_id, modified_page, tid);
-            return modified_v_id;
-        } else {
-            println!("Here {}",new_page.get_page_id());
-            self.write_page(container_id, new_page, tid);
-            return new_v_id;
-        } */
     }
 
     /// Insert some bytes into a container for vector of values (e.g. record).
@@ -606,7 +559,7 @@ mod test {
         let vals = get_random_vec_of_byte_vec(1000, 40, 400);
         sm.insert_values(cid, vals, tid);
         let mut count = 0;
-        for _ in sm.get_iterator(cid, tid, Permissions::ReadOnly) {
+        for i in sm.get_iterator(cid, tid, Permissions::ReadOnly) {
             count += 1;
         }
         assert_eq!(1000, count);

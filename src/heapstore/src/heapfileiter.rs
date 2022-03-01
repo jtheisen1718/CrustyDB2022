@@ -23,13 +23,13 @@ impl HeapFileIterator {
     /// Create a new HeapFileIterator that stores the container_id, tid, and heapFile pointer.
     /// This should initialize the state required to iterate through the heap file.
     pub(crate) fn new(_container_id: ContainerId, _tid: TransactionId, hf: Arc<HeapFile>) -> Self {
-        if hf.num_pages() == 0 {
+        /* if hf.num_pages() == 0 {
             return HeapFileIterator {
                 hf,
                 page_index: 0,
                 page_iter: Page::new(0).into_iter(),
             };
-        };
+        }; */
         let page;
         {
             let p_ids = hf.page_ids.read().unwrap();
@@ -52,20 +52,24 @@ impl Iterator for HeapFileIterator {
         if self.page_index >= self.hf.num_pages() {
             return None;
         };
-        let this = self.page_iter.next();
-        if this == None {
+        let this_entry = self.page_iter.next();
+        // If at the end of a page
+        if this_entry == None {
             self.page_index += 1;
-            let page;
+            let new_page;
             {
                 let p_ids = self.hf.page_ids.read().unwrap();
-                page = self
+                if p_ids.len() <= (self.page_index as usize){
+                    return None;
+                }
+                new_page = self
                     .hf
                     .read_page_from_file(p_ids[self.page_index as usize])
                     .unwrap();
             }
-            self.page_iter = page.into_iter();
+            self.page_iter = new_page.into_iter();
             return self.next();
         };
-        this
+        this_entry
     }
 }
