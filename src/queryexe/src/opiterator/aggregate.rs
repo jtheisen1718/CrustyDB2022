@@ -35,9 +35,7 @@ impl Aggregator {
         groupby_fields: Vec<usize>,
         schema: &TableSchema,
     ) -> Self {
-        Self {
-            panic!("TODO milestone op");
-        }
+        panic!("TODO milestone op");
     }
 
 
@@ -563,7 +561,7 @@ mod test {
 
         #[test]
         fn test_get_schema() {
-            let mut agg_names = vec!["count", "avg", "max"];
+            let mut agg_names = vec!["count", "max"];
             let mut groupby_names = vec!["group1", "group2"];
             let ti = tuple_iterator();
             let ai = Aggregate::new(

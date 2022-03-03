@@ -76,6 +76,15 @@ sh runTests.sh
 ```
 
 This will execute every test in e2e-tests/testdata.
+Note the test `run_sql_logic_tests` attempts to run all of the tests in the testdata directory. 
+The test `run_sql_join` is redundant, and runs a single test (which is covered by the full test suite).
+We include this so you can see how to run one test if needed for debugging. 
+You should also note that these tests work by running a client and server. If something goes wrong and 
+your server does not properly close/clean-up/reset you may leave a server process hung (running in
+in the background.) When you try to run a test again you will see the port is blocked. You will need to identify
+the process and kill it (it will likely be called server).  You might need to search for how to do this 
+if you haven't. For example, this SO article shows how to do this based on a port for Mac: 
+https://stackoverflow.com/questions/3855127/find-and-kill-process-locking-port-3000-on-mac .
 
 ## Scoring and Requirements
 
@@ -99,4 +108,5 @@ liked/disliked on the milestone.
 - If you know some part of the milestone is incomplete, write up what parts are
 not working, how close you think you are, and what part(s) you got stuck on.
 
-
+## Additional Tips
+If you run `cargo test -p queryexe` before implementing anything, you will see 33 passed tests. This is because several operators have been implemented. Your goal is to implement aggregate and join to pass the rest of the test cases without breaking other passed tests. If you want to run test cases under a particular operator - use `cargo test -p queryexe opiterator::<op to test>` , e.g. `cargo test -p queryexe opiterator::join`
