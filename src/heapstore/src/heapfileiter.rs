@@ -30,7 +30,7 @@ impl HeapFileIterator {
                 page_iter: Page::new(0).into_iter(),
             };
         }; */
-        let page;
+        let page: Page;
         {
             let p_ids = hf.page_ids.read().unwrap();
             page = hf.read_page_from_file(p_ids[0]).unwrap();
@@ -59,7 +59,7 @@ impl Iterator for HeapFileIterator {
             let new_page;
             {
                 let p_ids = self.hf.page_ids.read().unwrap();
-                if p_ids.len() <= (self.page_index as usize){
+                if p_ids.len() <= (self.page_index as usize) {
                     return None;
                 }
                 new_page = self

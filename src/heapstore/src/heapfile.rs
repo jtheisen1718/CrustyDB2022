@@ -7,7 +7,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, RwLock};
 
-
 use std::io::{Seek, SeekFrom};
 
 /// The struct for a heap file.  
@@ -22,7 +21,6 @@ use std::io::{Seek, SeekFrom};
 /// Your code should persist what information is needed to recreate the heapfile.
 ///
 pub(crate) struct HeapFile {
-    // TODO milestone hs (add new fields)
     pub f: Arc<RwLock<File>>,
     pub file_path: String,
     pub page_ids: RwLock<Vec<PageId>>,
@@ -42,6 +40,7 @@ impl HeapFile {
     /// Create a new heapfile for the given path and container Id. Return Result<Self> if able to create.
     /// Errors could arise from permissions, space, etc when trying to create the file used by HeapFile.
     pub(crate) fn new(file_path: PathBuf) -> Result<Self, CrustyError> {
+        // Open heapfile
         let file = match OpenOptions::new()
             .read(true)
             .write(true)
@@ -60,7 +59,6 @@ impl HeapFile {
         };
 
         Ok(HeapFile {
-            // TODO milestone hs init your new field(s)
             f: Arc::new(RwLock::new(file)),
             file_path: file_path.to_str().unwrap().to_string(),
             page_ids: RwLock::new(Vec::new()),
@@ -85,6 +83,7 @@ impl HeapFile {
             self.read_count.fetch_add(1, Ordering::Relaxed);
         }
 
+        // Check for invalid page_id
         if !(self.page_ids.read().unwrap().contains(&pid)) {
             return Err(CrustyError::CrustyError(format!(
                 "Invalid pageID: {}",
@@ -92,7 +91,11 @@ impl HeapFile {
             )));
         };
 
+        // Create byte array to hold the page
         let mut buffer: [u8; PAGE_SIZE] = [0; PAGE_SIZE];
+        // Find the index of page_id in the page_ids vector, which corresponds
+        // to the index of the byte block of size 4096 that the page is
+        // serialized to
         let index;
         {
             index = self
@@ -104,10 +107,25 @@ impl HeapFile {
                 .unwrap();
         }
         {
-            let mut file = self.f.try_write().unwrap();
-            file.seek(SeekFrom::Start((index * PAGE_SIZE).try_into().unwrap()));
-            file.read(&mut buffer);
+            
+            let mut file = self.f.write().unwrap();
+
+            // Seek to page
+            if let Err(e) = file.seek(SeekFrom::Start((index * PAGE_SIZE).try_into().unwrap())) {
+                return Err(CrustyError::CrustyError(format!(
+                    "Cannot seek through heapfile: {:?}",
+                    e
+                )));
+            };
+            // Read to buffer
+            if let Err(e) = file.read(&mut buffer) {
+                return Err(CrustyError::CrustyError(format!(
+                    "Cannot read heapfile: {:?}",
+                    e
+                )));
+            };
         }
+        // Turn buffer into page object and return it.
         let page = Page::from_bytes(&buffer);
         Ok(page)
     }
@@ -120,22 +138,30 @@ impl HeapFile {
         {
             self.write_count.fetch_add(1, Ordering::Relaxed);
         }
-        
+
         let page_bytes: &[u8] = &(page.get_bytes());
         let index;
         {
-            let mut p_ids = self.page_ids.try_write().unwrap();
-            if !p_ids.contains(&page.p_id){
+            let mut p_ids = self.page_ids.write().unwrap();
+            if !p_ids.contains(&page.p_id) {
                 p_ids.push(page.p_id)
             }
-            index = p_ids
-                .iter()
-                .position(|&r| r == page.p_id)
-                .unwrap();
+            index = p_ids.iter().position(|&r| r == page.p_id).unwrap();
         }
-        let mut file = self.f.try_write().unwrap();
-        file.seek(SeekFrom::Start((index * PAGE_SIZE).try_into().unwrap()));
-        file.write(page_bytes);
+        
+        let mut file = self.f.write().unwrap();
+        if let Err(e) = file.seek(SeekFrom::Start((index * PAGE_SIZE).try_into().unwrap())) {
+            return Err(CrustyError::CrustyError(format!(
+                "Cannot seek through heapfile: {:?}",
+                e
+            )));
+        };
+        if let Err(e) = file.write(page_bytes) {
+            return Err(CrustyError::CrustyError(format!(
+                "Cannot write to heapfile: {:?}",
+                e
+            )));
+        };
         Ok(())
     }
 }

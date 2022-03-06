@@ -2,7 +2,6 @@ use common::ids::{PageId, SlotId};
 use common::PAGE_SIZE;
 use std::convert::TryInto;
 
-
 pub const GENERAL_METADATA_SIZE: usize = 8;
 pub const RECORD_METADATA_SIZE: usize = 6;
 
@@ -58,16 +57,16 @@ impl Page {
     pub fn add_value(&mut self, bytes: &[u8]) -> Option<SlotId> {
         let b_size: usize = bytes.len();
         let head_end = self.get_header_size();
-        if (self.end_of_used_space as usize) < (head_end + RECORD_METADATA_SIZE){
+        if (self.end_of_used_space as usize) < (head_end + RECORD_METADATA_SIZE) {
             return None;
         }
         let remaining_space: usize =
             self.end_of_used_space as usize - (head_end + RECORD_METADATA_SIZE);
-        let start: usize = (self.end_of_used_space as usize) - &b_size;
+        let start: usize = (self.end_of_used_space as usize) - b_size;
 
         // Fill data in (or return None if it doesn't fit)
-        if &remaining_space >= &b_size {
-            self.data[start..(&start + &b_size)].clone_from_slice(bytes);
+        if remaining_space >= b_size {
+            self.data[start..(start + b_size)].clone_from_slice(bytes);
         } else {
             return None;
         }
@@ -75,7 +74,7 @@ impl Page {
         // Update metadata
         let mut s_id_offset = head_end;
         let next_copy = self.next_s_id;
-        if &self.highest_s_id == &self.next_s_id {
+        if self.highest_s_id == self.next_s_id {
             self.highest_s_id += 1;
             self.next_s_id += 1;
         } else {
@@ -137,7 +136,7 @@ impl Page {
 
         // Compress data
         let moving_data = self.data[self.end_of_used_space as usize..offset as usize].to_vec();
-        self.data[(&self.end_of_used_space + size) as usize..(offset + size) as usize]
+        self.data[(self.end_of_used_space + size) as usize..(offset + size) as usize]
             .clone_from_slice(&moving_data);
 
         // Update metadata
@@ -150,7 +149,7 @@ impl Page {
             );
             if offset_value < offset {
                 self.data[(current_offset as usize)..(current_offset as usize + 2)]
-                    .clone_from_slice(&(u16::to_be_bytes(offset_value + &size)));
+                    .clone_from_slice(&(u16::to_be_bytes(offset_value + size)));
             };
             current_offset += RECORD_METADATA_SIZE;
         }
@@ -184,8 +183,8 @@ impl Page {
     pub fn get_bytes(&self) -> Vec<u8> {
         let mut d = [0u8; PAGE_SIZE];
         d.clone_from_slice(&self.data[0..PAGE_SIZE]);
-        d[2..4].clone_from_slice(&self.next_s_id.to_be_bytes());
-        d[4..6].clone_from_slice(&self.highest_s_id.to_be_bytes());
+        d[2..4].clone_from_slice(&self.highest_s_id.to_be_bytes());
+        d[4..6].clone_from_slice(&self.next_s_id.to_be_bytes());
         d[6..8].clone_from_slice(&self.end_of_used_space.to_be_bytes());
         d.to_vec()
     }
@@ -207,7 +206,7 @@ impl Page {
     /// Will be used by tests. Optional for you to use in your code
     #[allow(dead_code)]
     pub(crate) fn get_largest_free_contiguous_space(&self) -> usize {
-        self.end_of_used_space as usize - &self.get_header_size()
+        self.end_of_used_space as usize - self.get_header_size()
     }
 }
 

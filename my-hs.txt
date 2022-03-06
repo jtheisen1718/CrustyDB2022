@@ -1,0 +1,63 @@
+# heapfile.rs
+
+In deciding the shape of my heapfile struct, I included the open file, the
+path to the file, and a RwLocked vector of the page_ids in the heapfile.
+The vector of page_ids ensures that I can access each page in the file, 
+especially in the case of deletions (ie: if i insert [1,2,3] and remove 2, 
+don't have to worry that the page ids are discontinuous).
+
+Heapfiles are just blocks of PAGE_SIZE bytes, so read_page_from_file simply 
+reads the bytes from the position of the page_id in page_ids (multiplied by 
+PAGE_SIZE) to that position plus PAGE_SIZE into a byte buffer. We then use 
+the page function from_bytes to turn it into a page object, which we return.
+
+write_page_to_file just serializes the page with page.get_bytes(), finds the, 
+inserts the p_id into page_ids if it isn't already in the vector, and sets the
+position of the inserted or existing id to index. It then seeks to index and 
+overwrites the following PAGE_SIZE bytes with the serialized page.
+
+# storage_manager.rs
+
+The StorageManager struct holds the storage path, whether or not its temporary, 
+and a RwLocked, HashMap with ContainerId keys and Arc<HeapFile> values. 
+The containers vector is protected by an RwLock to allow optimal concurrent 
+access. Since heapfiles are the containers, having them accessible in a HashMap 
+is best because there will most likely only be equality lookups and the size is
+dynamic. It is also easy to serialize and deserialize.
+
+During shutdown, the StorageManager has to be serialized. First the metadata
+file, which everything will be serialized into, is created. Every heapfile in
+container is then converted into a SerializableHeapFile, which is a struct that
+has only the file_path to the heapfile and the vector of page_ids. This struct
+is serializable with serde, so when each of these SerializableHeapFiles are
+inserted to a HashMap, serde serializes the HashMap, it's written to the
+metadata json, and self.containers is emptied.
+
+With serialization taken care of, manipulating the database is all that remains.
+When a value is inserted, it must check where there is free space for it first. 
+If space is available, the heapfile and consequently page functions are used to 
+insert the value to the existing page. Otherwise, a new page is generated, the 
+value is added, and the page is appended to the heapfile (the p_id is also 
+pushed to the page_ids vector)
+
+delete_value just reads the page to memory, deletes the value in the page, and 
+rewrites the entire page back to the heapfile. update_value deletes the value 
+and inserts it the new one.
+
+# heapfileiter.rs
+The heapfile iterator initializes by storing the heapfile, setting page_index to
+0, and initializing the page_iter to the iterator of the first page in 
+hf.page_ids. Next advances the page_iter. If it's a value, it just returns the 
+value. This makes iterating through the pages pretty fast because the heapfile
+doesn't need to be accessed within the same page. Once page_iter returns None,
+you know the end of the page has been reached, so the page index is increased,
+then the page at the next page index of heapfile's p_id is read into memory and
+a page iterator is created and the next value is returned.
+
+# Time
+This project took me about 40 hours. I liked designing most of the work, but
+some more guidance on iterators might have been helpful. Even with the primer,
+this project as my first introduction to rust has been difficult.
+
+# Completion
+Everything but the hidden tests are working
