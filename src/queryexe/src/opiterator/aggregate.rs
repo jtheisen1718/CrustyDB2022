@@ -20,12 +20,8 @@ struct Aggregator {
     groupby_fields: Vec<usize>,
     /// Schema of the output.
     schema: TableSchema,
-    /// Counts for computation of averages
-    avg_counts: Vec<[i32; 2]>,
-    /// Blank tuple
-    tuple_template: Tuple,
 
-    group_vals: HashMap<Tuple, Tuple>,
+    group_vals: HashMap<Tuple, Vec<Field>>,
 }
 
 impl Aggregator {
@@ -41,35 +37,10 @@ impl Aggregator {
         groupby_fields: Vec<usize>,
         schema: &TableSchema,
     ) -> Self {
-        let mut avg_counts: Vec<[i32; 2]> = Vec::new();
-        let mut template_fields: Vec<Field> = Vec::new();
-
-        for af in &agg_fields {
-            match af.op {
-                AggOp::Avg => {
-                    avg_counts.push([template_fields.len() as i32, 0]);
-                    template_fields.push(Field::IntField(0));
-                }
-                AggOp::Count => {
-                    template_fields.push(Field::IntField(0));
-                }
-                AggOp::Max => {
-                    template_fields.push(Field::IntField(i32::MIN));
-                }
-                AggOp::Min => {
-                    template_fields.push(Field::IntField(i32::MAX));
-                }
-                AggOp::Sum => {
-                    template_fields.push(Field::IntField(0));
-                }
-            }
-        }
         return Aggregator {
             agg_fields: agg_fields,
             groupby_fields: groupby_fields,
             schema: schema.clone(),
-            avg_counts: avg_counts,
-            tuple_template: Tuple::new(template_fields),
             group_vals: HashMap::new(),
         };
     }
@@ -83,71 +54,106 @@ impl Aggregator {
     ///
     /// * `tuple` - Tuple to add to a group.
     pub fn merge_tuple_into_group(&mut self, tuple: &Tuple) {
+        // Create group_id tuple as key for aggregates
         let mut group_fields = vec![];
         for i in &self.groupby_fields {
-            group_fields.push(tuple.get_field(*i).unwrap().clone());
+            // println!("groupby_field index: {}",i);
+            let gf = tuple.get_field(*i).unwrap().clone();
+            // println!("groupby field: {:?}",gf);
+            group_fields.push(gf);
         }
         let group_id = Tuple::new(group_fields);
+        let group_id_clone = group_id.clone();
 
-        let existing_tup = self
-            .group_vals
-            .entry(group_id)
-            .or_insert(self.tuple_template.clone());
-        let mut avg_index = 0;
-        for idx in 0..self.agg_fields.len() {
-            match self.agg_fields[idx].op {
-                AggOp::Avg => {
-                    let mut sum = existing_tup.get_field(idx).unwrap().unwrap_int_field();
-                    sum += tuple.get_field(idx).unwrap().unwrap_int_field();
-                    existing_tup.set_field(idx, Field::IntField(sum));
-                    self.avg_counts[avg_index][1] += 1;
-                    avg_index += 1;
+        // println!("Group_id: {:?}",group_id);
+        if self.group_vals.contains_key(&group_id){
+            // println!("Existing aggs: {:?}",self.group_vals[&group_id]);
+        }
+        let mut aggs: Vec<Field> = Vec::new();
+        if !self.group_vals.contains_key(&group_id) {
+            for af in &self.agg_fields {
+                match af.op {
+                    AggOp::Avg => {
+                        aggs.push(tuple.get_field(af.field).unwrap().clone());
+                        aggs.push(Field::IntField(1));
+                    }
+                    AggOp::Count => {
+                        aggs.push(Field::IntField(1));
+                    }
+                    AggOp::Max => {
+                        aggs.push(tuple.get_field(af.field).unwrap().clone());
+                    }
+                    AggOp::Min => {
+                        aggs.push(tuple.get_field(af.field).unwrap().clone());
+                    }
+                    AggOp::Sum => {
+                        aggs.push(tuple.get_field(af.field).unwrap().clone());
+                    }
                 }
-                AggOp::Count => {
-                    let count = existing_tup.get_field(idx).unwrap().unwrap_int_field() + 1;
-                    existing_tup.set_field(idx, Field::IntField(count));
-                }
-                AggOp::Max => {
-                    let mut m = existing_tup.get_field(idx).unwrap().unwrap_int_field();
-                    m = max(m, tuple.get_field(idx).unwrap().unwrap_int_field());
-                    existing_tup.set_field(idx, Field::IntField(m));
-                }
-                AggOp::Min => {
-                    let mut m = existing_tup.get_field(idx).unwrap().unwrap_int_field();
-                    m = min(m, tuple.get_field(idx).unwrap().unwrap_int_field());
-                    existing_tup.set_field(idx, Field::IntField(m));
-                }
-                AggOp::Sum => {
-                    let mut sum = existing_tup.get_field(idx).unwrap().unwrap_int_field();
-                    sum += tuple.get_field(idx).unwrap().unwrap_int_field();
-                    existing_tup.set_field(idx, Field::IntField(sum));
+            }
+        } else {
+            let mut avgs = 0;
+            aggs = self.group_vals[&group_id].clone();
+            for (idx, af) in self.agg_fields.iter().enumerate() {
+                match af.op {
+                    AggOp::Avg => {
+                        let new_sum = aggs[idx + avgs].unwrap_int_field() + tuple.get_field(af.field).unwrap().unwrap_int_field();
+                        aggs[idx + avgs] = Field::IntField(new_sum);
+                        aggs[idx + avgs + 1] = Field::IntField(aggs[idx + avgs + 1].unwrap_int_field() + 1);
+                        avgs += 1;
+                    }
+                    AggOp::Count => {
+                        aggs[idx + avgs] = Field::IntField(aggs[idx + avgs].unwrap_int_field() + 1);
+                    }
+                    AggOp::Max => {
+                        aggs[idx + avgs] = max(
+                            aggs[idx + avgs].clone(),
+                            tuple.get_field(af.field).unwrap().clone(),
+                        );
+                    }
+                    AggOp::Min => {
+                        aggs[idx + avgs] = min(
+                            aggs[idx + avgs].clone(),
+                            tuple.get_field(af.field).unwrap().clone(),
+                        );
+                    }
+                    AggOp::Sum => {
+                        let new_sum = aggs[idx + avgs].unwrap_int_field() + tuple.get_field(af.field).unwrap().unwrap_int_field();
+                        aggs[idx + avgs] = Field::IntField(new_sum);
+                    }
                 }
             }
         }
+        self.group_vals.insert(group_id, aggs);
+        // println!("Updated aggs: {:?}",self.group_vals[&group_id_clone]);
     }
-
+    
     /// Returns a `TupleIterator` over the results.
     ///
     /// Resulting tuples must be of the form: (group by fields ..., aggregate fields ...)
     pub fn iterator(&self) -> TupleIterator {
         let mut tuples: Vec<Tuple> = Vec::new();
-        if &self.avg_counts.len() > &0 {
-            for (group_id, aggregates) in &self.group_vals {
-                let mut a = aggregates.clone();
-                for pair in &self.avg_counts{
-                    let idx = pair[0];
-                    let count = pair[1];
-                    let sum = a.get_field(idx as usize).unwrap().unwrap_int_field();
-                    a.set_field(idx as usize,Field::IntField(sum / count));
+        for (group_id, aggregates) in &self.group_vals {
+            // Turn aggregates into tuple
+            // println!("group_id: {:?}",group_id);
+            // println!("aggregates: {:?}",aggregates);
+            let mut fields: Vec<Field> = Vec::new();
+            let aggs = &self.group_vals[group_id];
+            let mut avgs = 0;
+            for (idx, af) in self.agg_fields.iter().enumerate() {
+                match af.op {
+                    AggOp::Avg => {
+                        let average = aggs[idx + avgs].unwrap_int_field() / aggs[idx + avgs + 1].unwrap_int_field();
+                        fields.push(Field::IntField(average));
+                        avgs += 1;
+                    },
+                    _ => fields.push(aggs[idx + avgs].clone()),
                 }
-                tuples.push(group_id.merge(&a));
             }
-        } else {
-            for (group_id, aggregates) in &self.group_vals {
-                tuples.push(group_id.merge(&aggregates));
-            }
+            let t = Tuple::new(fields);
+            tuples.push(group_id.merge(&t));
         }
-        return TupleIterator::new(tuples, self.schema.clone());
+        TupleIterator::new(tuples, self.schema.clone())
     }
 }
 
@@ -222,12 +228,16 @@ impl OpIterator for Aggregate {
     fn open(&mut self) -> Result<(), CrustyError> {
         if !self.open {
             if let Err(e) = self.child.open() {
-                panic!("Cannot open child: {}",e);
+                panic!("Cannot open child: {}", e);
             };
             while let Ok(Some(tuple)) = self.child.next() {
                 self.aggregator.merge_tuple_into_group(&tuple);
             }
-            self.agg_iter = Some(self.aggregator.iterator());
+            let mut i = self.aggregator.iterator();
+            if let Err(e) = i.open() {
+                panic!("Cannot open iterator: {}", e);
+            };
+            self.agg_iter = Some(i);
             self.open = true;
             Ok(())
         } else {
@@ -255,6 +265,7 @@ impl OpIterator for Aggregate {
         if !self.open {
             panic!("OpIterator not open");
         }
+        println!("{:?}",self.agg_iter.as_ref().unwrap().get_index());
         self.agg_iter.as_mut().unwrap().rewind()
     }
 
@@ -334,11 +345,7 @@ mod test {
         /// * `expected` - The expected result.
         fn test_no_group(op: AggOp, field: usize, expected: i32) -> Result<(), CrustyError> {
             let schema = TableSchema::new(vec![Attribute::new("agg".to_string(), DataType::Int)]);
-            let mut agg = Aggregator::new(
-                vec![AggregateField { field, op }],
-                Vec::new(),
-                &schema,
-            );
+            let mut agg = Aggregator::new(vec![AggregateField { field, op }], Vec::new(), &schema);
             let ti = tuples();
             for t in &ti {
                 agg.merge_tuple_into_group(t);
@@ -608,10 +615,30 @@ mod test {
             let mut result = iter_to_vec(&mut ai)?;
             result.sort();
             let expected = vec![
-                vec![Field::IntField(1), Field::IntField(3), Field::IntField(2), Field::IntField(2)],
-                vec![Field::IntField(1), Field::IntField(4), Field::IntField(1), Field::IntField(3)],
-                vec![Field::IntField(2), Field::IntField(4), Field::IntField(1), Field::IntField(4)],
-                vec![Field::IntField(2), Field::IntField(5), Field::IntField(2), Field::IntField(6)],
+                vec![
+                    Field::IntField(1),
+                    Field::IntField(3),
+                    Field::IntField(2),
+                    Field::IntField(2),
+                ],
+                vec![
+                    Field::IntField(1),
+                    Field::IntField(4),
+                    Field::IntField(1),
+                    Field::IntField(3),
+                ],
+                vec![
+                    Field::IntField(2),
+                    Field::IntField(4),
+                    Field::IntField(1),
+                    Field::IntField(4),
+                ],
+                vec![
+                    Field::IntField(2),
+                    Field::IntField(5),
+                    Field::IntField(2),
+                    Field::IntField(6),
+                ],
             ];
             assert_eq!(expected, result);
             ai.open()?;
@@ -695,9 +722,12 @@ mod test {
                 vec![AggOp::Count],
                 Box::new(ti),
             );
+            println!("{}",ai.open);
             ai.open()?;
             let count_before = num_tuples(&mut ai);
+            println!("here");
             ai.rewind()?;
+            println!("here");
             let count_after = num_tuples(&mut ai);
             ai.close()?;
             assert_eq!(count_before, count_after);

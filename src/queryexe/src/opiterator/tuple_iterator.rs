@@ -25,6 +25,9 @@ impl TupleIterator {
             schema,
         }
     }
+    pub fn get_index(&self) -> Option<usize> {
+        self.index
+    }
 }
 
 impl OpIterator for TupleIterator {
