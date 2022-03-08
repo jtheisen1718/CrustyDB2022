@@ -20,6 +20,12 @@ struct Aggregator {
     groupby_fields: Vec<usize>,
     /// Schema of the output.
     schema: TableSchema,
+    /// Counts for computation of averages
+    avg_counts: Vec<[i32; 2]>,
+    /// Blank tuple
+    tuple_template: Tuple,
+
+    group_vals: HashMap<Tuple, Tuple>,
 }
 
 impl Aggregator {
@@ -35,9 +41,38 @@ impl Aggregator {
         groupby_fields: Vec<usize>,
         schema: &TableSchema,
     ) -> Self {
-        panic!("TODO milestone op");
-    }
+        let mut avg_counts: Vec<[i32; 2]> = Vec::new();
+        let mut template_fields: Vec<Field> = Vec::new();
 
+        for af in &agg_fields {
+            match af.op {
+                AggOp::Avg => {
+                    avg_counts.push([template_fields.len() as i32, 0]);
+                    template_fields.push(Field::IntField(0));
+                }
+                AggOp::Count => {
+                    template_fields.push(Field::IntField(0));
+                }
+                AggOp::Max => {
+                    template_fields.push(Field::IntField(i32::MIN));
+                }
+                AggOp::Min => {
+                    template_fields.push(Field::IntField(i32::MAX));
+                }
+                AggOp::Sum => {
+                    template_fields.push(Field::IntField(0));
+                }
+            }
+        }
+        return Aggregator {
+            agg_fields: agg_fields,
+            groupby_fields: groupby_fields,
+            schema: schema.clone(),
+            avg_counts: avg_counts,
+            tuple_template: Tuple::new(template_fields),
+            group_vals: HashMap::new(),
+        };
+    }
 
     /// Handles the creation of groups for aggregation.
     ///
@@ -48,14 +83,71 @@ impl Aggregator {
     ///
     /// * `tuple` - Tuple to add to a group.
     pub fn merge_tuple_into_group(&mut self, tuple: &Tuple) {
-        panic!("TODO milestone op");
+        let mut group_fields = vec![];
+        for i in &self.groupby_fields {
+            group_fields.push(tuple.get_field(*i).unwrap().clone());
+        }
+        let group_id = Tuple::new(group_fields);
+
+        let existing_tup = self
+            .group_vals
+            .entry(group_id)
+            .or_insert(self.tuple_template.clone());
+        let mut avg_index = 0;
+        for idx in 0..self.agg_fields.len() {
+            match self.agg_fields[idx].op {
+                AggOp::Avg => {
+                    let mut sum = existing_tup.get_field(idx).unwrap().unwrap_int_field();
+                    sum += tuple.get_field(idx).unwrap().unwrap_int_field();
+                    existing_tup.set_field(idx, Field::IntField(sum));
+                    self.avg_counts[avg_index][1] += 1;
+                    avg_index += 1;
+                }
+                AggOp::Count => {
+                    let count = existing_tup.get_field(idx).unwrap().unwrap_int_field() + 1;
+                    existing_tup.set_field(idx, Field::IntField(count));
+                }
+                AggOp::Max => {
+                    let mut m = existing_tup.get_field(idx).unwrap().unwrap_int_field();
+                    m = max(m, tuple.get_field(idx).unwrap().unwrap_int_field());
+                    existing_tup.set_field(idx, Field::IntField(m));
+                }
+                AggOp::Min => {
+                    let mut m = existing_tup.get_field(idx).unwrap().unwrap_int_field();
+                    m = min(m, tuple.get_field(idx).unwrap().unwrap_int_field());
+                    existing_tup.set_field(idx, Field::IntField(m));
+                }
+                AggOp::Sum => {
+                    let mut sum = existing_tup.get_field(idx).unwrap().unwrap_int_field();
+                    sum += tuple.get_field(idx).unwrap().unwrap_int_field();
+                    existing_tup.set_field(idx, Field::IntField(sum));
+                }
+            }
+        }
     }
 
     /// Returns a `TupleIterator` over the results.
     ///
     /// Resulting tuples must be of the form: (group by fields ..., aggregate fields ...)
     pub fn iterator(&self) -> TupleIterator {
-        panic!("TODO milestone op");
+        let mut tuples: Vec<Tuple> = Vec::new();
+        if &self.avg_counts.len() > &0 {
+            for (group_id, aggregates) in &self.group_vals {
+                let mut a = aggregates.clone();
+                for pair in &self.avg_counts{
+                    let idx = pair[0];
+                    let count = pair[1];
+                    let sum = a.get_field(idx as usize).unwrap().unwrap_int_field();
+                    a.set_field(idx as usize,Field::IntField(sum / count));
+                }
+                tuples.push(group_id.merge(&a));
+            }
+        } else {
+            for (group_id, aggregates) in &self.group_vals {
+                tuples.push(group_id.merge(&aggregates));
+            }
+        }
+        return TupleIterator::new(tuples, self.schema.clone());
     }
 }
 
@@ -67,6 +159,8 @@ pub struct Aggregate {
     agg_fields: Vec<AggregateField>,
     /// Aggregation iterators for results.
     agg_iter: Option<TupleIterator>,
+    /// Aggregator
+    aggregator: Aggregator,
     /// Output schema of the form [groupby_field attributes ..., agg_field attributes ...]).
     schema: TableSchema,
     /// Boolean if the iterator is open.
@@ -94,29 +188,80 @@ impl Aggregate {
         ops: Vec<AggOp>,
         child: Box<dyn OpIterator>,
     ) -> Self {
-        panic!("TODO milestone op");
-    }
+        let mut attributes: Vec<Attribute> = Vec::new();
+        for (idx, gi) in groupby_indices.iter().enumerate() {
+            let mut a = child.get_schema().get_attribute(*gi).unwrap().clone();
+            a.name = groupby_names[idx].to_string();
+            attributes.push(a);
+        }
 
+        let mut agg_fields: Vec<AggregateField> = Vec::new();
+        for (idx, ai) in agg_indices.iter().enumerate() {
+            agg_fields.push(AggregateField {
+                field: *ai,
+                op: ops[idx],
+            });
+            let a = Attribute::new(agg_names[idx].to_string(), DataType::Int);
+            attributes.push(a);
+        }
+        let schema = TableSchema::new(attributes);
+        let aggregator = Aggregator::new(agg_fields.clone(), groupby_indices.clone(), &schema);
+        return Aggregate {
+            groupby_fields: groupby_indices,
+            agg_fields: agg_fields,
+            agg_iter: None,
+            aggregator: aggregator,
+            schema: schema,
+            open: false,
+            child: child,
+        };
+    }
 }
 
 impl OpIterator for Aggregate {
     fn open(&mut self) -> Result<(), CrustyError> {
-        panic!("TODO milestone op");
+        if !self.open {
+            if let Err(e) = self.child.open() {
+                panic!("Cannot open child: {}",e);
+            };
+            while let Ok(Some(tuple)) = self.child.next() {
+                self.aggregator.merge_tuple_into_group(&tuple);
+            }
+            self.agg_iter = Some(self.aggregator.iterator());
+            self.open = true;
+            Ok(())
+        } else {
+            panic!("OpIterator already open");
+        }
     }
 
     fn next(&mut self) -> Result<Option<Tuple>, CrustyError> {
-        panic!("TODO milestone op");
+        if !self.open {
+            panic!("OpIterator not open");
+        }
+        self.agg_iter.as_mut().unwrap().next()
     }
 
     fn close(&mut self) -> Result<(), CrustyError> {
-        panic!("TODO milestone op");
+        if !self.open {
+            panic!("OpIterator not open");
+        }
+        self.open = false;
+        self.agg_iter = None;
+        self.child.close()
     }
 
     fn rewind(&mut self) -> Result<(), CrustyError> {
-        panic!("TODO milestone op");
+        if !self.open {
+            panic!("OpIterator not open");
+        }
+        self.agg_iter.as_mut().unwrap().rewind()
     }
 
     fn get_schema(&self) -> &TableSchema {
+        /* if !self.open {
+            panic!("OpIterator not open");
+        } */
         &self.schema
     }
 }

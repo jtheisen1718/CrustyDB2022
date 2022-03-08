@@ -386,7 +386,7 @@ impl fmt::Display for Field {
 }
 
 /// Tuple type.
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone, Hash)]
 pub struct Tuple {
     /// Tuple data.
     pub field_vals: Vec<Field>,

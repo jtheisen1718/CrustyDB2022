@@ -12,7 +12,6 @@ pub struct JoinPredicate {
     right_index: usize,
 }
 
-
 impl JoinPredicate {
     /// Constructor that determines if two tuples satisfy the join condition.
     ///
@@ -25,7 +24,6 @@ impl JoinPredicate {
         panic!("TODO milestone op");
     }
 }
-
 
 /// Nested loop join implementation. (You can add any other fields that you think are neccessary)
 pub struct Join {
@@ -87,7 +85,7 @@ impl OpIterator for Join {
 /// Hash equi-join implementation. (You can add any other fields that you think are neccessary)
 pub struct HashEqJoin {
     predicate: JoinPredicate,
-   
+
     left_child: Box<dyn OpIterator>,
     right_child: Box<dyn OpIterator>,
 
@@ -201,7 +199,7 @@ mod test {
         let tuples = create_tuple_list(vec![
             vec![1, 2, 2, 3, 4], // 1 < 2, 3, 4, 5
             vec![1, 2, 3, 4, 5],
-            vec![1, 2, 4, 5, 6], 
+            vec![1, 2, 4, 5, 6],
             vec![1, 2, 5, 6, 7],
             vec![3, 4, 4, 5, 6], // 3 < 4, 5
             vec![3, 4, 5, 6, 7],
@@ -213,12 +211,12 @@ mod test {
     pub fn lt_or_eq_join() -> TupleIterator {
         let tuples = create_tuple_list(vec![
             vec![1, 2, 1, 2, 3], // 1 <= 1, 2, 3, 4, 5
-            vec![1, 2, 2, 3, 4], 
+            vec![1, 2, 2, 3, 4],
             vec![1, 2, 3, 4, 5],
-            vec![1, 2, 4, 5, 6], 
+            vec![1, 2, 4, 5, 6],
             vec![1, 2, 5, 6, 7],
             vec![3, 4, 3, 4, 5], // 3 <= 3, 4, 5
-            vec![3, 4, 4, 5, 6], 
+            vec![3, 4, 4, 5, 6],
             vec![3, 4, 5, 6, 7],
             vec![5, 6, 5, 6, 7], // 5 <= 5
         ]);
@@ -235,20 +233,8 @@ mod test {
         let s1 = Box::new(scan1());
         let s2 = Box::new(scan2());
         match ty {
-            JoinType::NestedLoop => Box::new(Join::new(
-                op,
-                left_index,
-                right_index,
-                s1,
-                s2,
-            )),
-            JoinType::HashEq => Box::new(HashEqJoin::new(
-                op,
-                left_index,
-                right_index,
-                s1,
-                s2,
-            )),
+            JoinType::NestedLoop => Box::new(Join::new(op, left_index, right_index, s1, s2)),
+            JoinType::HashEq => Box::new(HashEqJoin::new(op, left_index, right_index, s1, s2)),
         }
     }
 
