@@ -21,7 +21,11 @@ impl JoinPredicate {
     /// * `left_index` - Index of the field to compare in the left tuple.
     /// * `right_index` - Index of the field to compare in the right tuple.
     fn new(op: SimplePredicateOp, left_index: usize, right_index: usize) -> Self {
-        panic!("TODO milestone op");
+        JoinPredicate {
+            op,
+            left_index,
+            right_index,
+        }
     }
 }
 
@@ -35,6 +39,10 @@ pub struct Join {
     right_child: Box<dyn OpIterator>,
     /// Schema of the result.
     schema: TableSchema,
+
+    joined_iter: Option<TupleIterator>,
+
+    open: bool,
 }
 
 impl Join {
@@ -45,7 +53,7 @@ impl Join {
     /// * `op` - Operation in join condition.
     /// * `left_index` - Index of the left field in join condition.
     /// * `right_index` - Index of the right field in join condition.
-    /// * `left_child` - Left child of join operator.
+    /// * `left_child` - Left child of join operator.l
     /// * `right_child` - Left child of join operator.
     pub fn new(
         op: SimplePredicateOp,
@@ -54,29 +62,78 @@ impl Join {
         left_child: Box<dyn OpIterator>,
         right_child: Box<dyn OpIterator>,
     ) -> Self {
-        panic!("TODO milestone op");
+        Join {
+            predicate: JoinPredicate::new(op, left_index, right_index),
+            schema: left_child.get_schema().merge(right_child.get_schema()),
+            left_child: left_child,
+            right_child: right_child,
+            joined_iter: None,
+            open: false,
+        }
     }
 }
 
 impl OpIterator for Join {
     fn open(&mut self) -> Result<(), CrustyError> {
-        panic!("TODO milestone op");
+        if let Err(e) = self.left_child.open() {
+            panic!("Cannot open left_child: {}", e);
+        }
+        if let Err(e) = self.right_child.open() {
+            panic!("Cannot open right_child: {}", e);
+        }
+        let mut tuples: Vec<Tuple> = Vec::new();
+        while let Ok(Some(lt)) = self.left_child.next() {
+            while let Ok(Some(rt)) = self.right_child.next() {
+                if self.predicate.op.compare(
+                    lt.get_field(self.predicate.left_index).unwrap(),
+                    rt.get_field(self.predicate.left_index).unwrap()
+                ) {
+                    tuples.push(lt.merge(&rt));
+                }
+            }
+            self.right_child.rewind();
+        }
+        let mut i = TupleIterator::new(tuples, self.schema.clone());
+        if let Err(e) = i.open() {
+            panic!("Cannot open TupleIterator: {}", e);
+        }
+        self.open = true;
+        self.joined_iter = Some(i);
+        Ok(())
     }
 
     /// Calculates the next tuple for a nested loop join.
     fn next(&mut self) -> Result<Option<Tuple>, CrustyError> {
-        panic!("TODO milestone op");
+        if !self.open {
+            panic!("OpIterator not open");
+        }
+        self.joined_iter.as_mut().unwrap().next()
     }
 
     fn close(&mut self) -> Result<(), CrustyError> {
-        panic!("TODO milestone op");
+        if !self.open {
+            panic!("OpIterator not open");
+        }
+        self.joined_iter.as_mut().unwrap().close();
+        self.joined_iter = None;
+        self.open = false;
+        if let Err(e) = self.left_child.close() {
+            panic!("Cannot close left_child: {}", e);
+        }
+        if let Err(e) = self.right_child.close() {
+            panic!("Cannot close right_child: {}", e);
+        }
+        Ok(())
     }
 
     fn rewind(&mut self) -> Result<(), CrustyError> {
-        panic!("TODO milestone op");
+        if !self.open {
+            panic!("OpIterator not open");
+        }
+        self.joined_iter.as_mut().unwrap().rewind()
     }
 
-    /// return schema of the result
+    // Return schema of the result
     fn get_schema(&self) -> &TableSchema {
         &self.schema
     }
@@ -84,12 +141,20 @@ impl OpIterator for Join {
 
 /// Hash equi-join implementation. (You can add any other fields that you think are neccessary)
 pub struct HashEqJoin {
+    /// Join condition.
     predicate: JoinPredicate,
-
+    /// Left child node.
     left_child: Box<dyn OpIterator>,
+    /// Right child node.
     right_child: Box<dyn OpIterator>,
-
+    /// Schema of the result.
     schema: TableSchema,
+
+    joined_iter: Option<TupleIterator>,
+
+    build_input: HashMap<Field,Tuple>,
+
+    open: bool,
 }
 
 impl HashEqJoin {
@@ -110,25 +175,72 @@ impl HashEqJoin {
         left_child: Box<dyn OpIterator>,
         right_child: Box<dyn OpIterator>,
     ) -> Self {
-        panic!("TODO milestone op");
+        HashEqJoin{
+            predicate: JoinPredicate::new(op, left_index, right_index),
+            schema: left_child.get_schema().merge(right_child.get_schema()),
+            left_child: left_child,
+            right_child: right_child,
+            joined_iter: None,
+            build_input: HashMap::new(),
+            open: false,
+        }
     }
 }
 
 impl OpIterator for HashEqJoin {
     fn open(&mut self) -> Result<(), CrustyError> {
-        panic!("TODO milestone op");
+        if let Err(e) = self.left_child.open() {
+            panic!("Cannot open left_child: {}", e);
+        }
+        if let Err(e) = self.right_child.open() {
+            panic!("Cannot open right_child: {}", e);
+        }
+        
+        while let Ok(Some(lt)) = self.left_child.next() {
+            self.build_input.insert(lt.get_field(self.predicate.left_index).unwrap().clone(),lt);
+        }
+        self.open = true;
+        Ok(())
     }
 
     fn next(&mut self) -> Result<Option<Tuple>, CrustyError> {
-        panic!("TODO milestone op");
+        if !self.open {
+            panic!("OpIterator not open");
+        }
+        match self.right_child.next() {
+            Ok(Some(rt)) => {
+                let r_key = rt.get_field(self.predicate.right_index).unwrap();
+                if self.build_input.contains_key(&r_key){
+                    let mut lt = self.build_input[r_key].clone();
+                    Ok(Some(lt.merge(&rt)))
+                } else {
+                    self.next()
+                }
+            },
+            ne => ne,
+        }
     }
 
     fn close(&mut self) -> Result<(), CrustyError> {
-        panic!("TODO milestone op");
+        if !self.open {
+            panic!("OpIterator not open");
+        }
+        self.build_input.clear();
+        self.open = false;
+        if let Err(e) = self.left_child.close() {
+            panic!("Cannot close left_child: {}", e);
+        }
+        if let Err(e) = self.right_child.close() {
+            panic!("Cannot close right_child: {}", e);
+        }
+        Ok(())
     }
 
     fn rewind(&mut self) -> Result<(), CrustyError> {
-        panic!("TODO milestone op");
+        if !self.open {
+            panic!("OpIterator not open");
+        }
+        self.right_child.rewind()
     }
 
     fn get_schema(&self) -> &TableSchema {
