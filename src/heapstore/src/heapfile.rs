@@ -107,7 +107,6 @@ impl HeapFile {
                 .unwrap();
         }
         {
-            
             let mut file = self.f.write().unwrap();
 
             // Seek to page
@@ -148,7 +147,7 @@ impl HeapFile {
             }
             index = p_ids.iter().position(|&r| r == page.p_id).unwrap();
         }
-        
+
         let mut file = self.f.write().unwrap();
         if let Err(e) = file.seek(SeekFrom::Start((index * PAGE_SIZE).try_into().unwrap())) {
             return Err(CrustyError::CrustyError(format!(
