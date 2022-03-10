@@ -61,7 +61,9 @@ impl Optimizer {
                 op,
                 left_table,
                 right_table,
-            }) => Ok(PhysicalOp::NestedLoopJoin(PhysicalNestedLoopJoinNode {
+            }) => Ok(PhysicalOp::HashJoin(PhysicalHashJoinNode {
+                hash_table_key: FieldIdentifier::new("a", "acol"),
+                hash_table_state_id: catalog.get_new_container_id(StateType::HashTable, None)?,
                 left,
                 right,
                 op,
