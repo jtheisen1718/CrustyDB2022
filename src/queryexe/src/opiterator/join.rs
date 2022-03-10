@@ -39,9 +39,9 @@ pub struct Join {
     right_child: Box<dyn OpIterator>,
     /// Schema of the result.
     schema: TableSchema,
-
-    left_tuple: Option<Tuple>,//joined_iter: Option<TupleIterator>,
-
+    // Store the outer (left) loop's tuple
+    outer_tuple: Option<Tuple>,
+    /// Boolean if the join is open.    
     open: bool,
 }
 
@@ -65,9 +65,9 @@ impl Join {
         Join {
             predicate: JoinPredicate::new(op, left_index, right_index),
             schema: left_child.get_schema().merge(right_child.get_schema()),
-            left_child: left_child,
-            right_child: right_child,
-            left_tuple: None,//joined_iter: None,
+            left_child,
+            right_child,
+            outer_tuple: None,
             open: false,
         }
     }
@@ -75,30 +75,10 @@ impl Join {
 
 impl OpIterator for Join {
     fn open(&mut self) -> Result<(), CrustyError> {
-        if let Err(e) = self.left_child.open() {
-            panic!("Cannot open left_child: {}", e);
-        }
-        if let Err(e) = self.right_child.open() {
-            panic!("Cannot open right_child: {}", e);
-        }
-        /* let mut tuples: Vec<Tuple> = Vec::new();
-        while let Ok(Some(lt)) = self.left_child.next() {
-            while let Ok(Some(rt)) = self.right_child.next() {
-                if self.predicate.op.compare(
-                    lt.get_field(self.predicate.left_index).unwrap(),
-                    rt.get_field(self.predicate.left_index).unwrap()
-                ) {
-                    tuples.push(lt.merge(&rt));
-                }
-            }
-            self.right_child.rewind();
-        }
-        let mut i = TupleIterator::new(tuples, self.schema.clone());
-        if let Err(e) = i.open() {
-            panic!("Cannot open TupleIterator: {}", e);
-        }
-        self.joined_iter = Some(i); */
-        self.left_tuple = self.left_child.next()?;
+        self.left_child.open()?;
+        self.right_child.open()?;
+        // Start outer table loop
+        self.outer_tuple = self.left_child.next()?;
         self.open = true;
         Ok(())
     }
@@ -108,25 +88,38 @@ impl OpIterator for Join {
         if !self.open {
             panic!("OpIterator not open");
         }
-        //self.joined_iter.as_mut().unwrap().next()
-        let mut right_tuple = self.right_child.next()?;
-        match &self.left_tuple {
-            Some(lt) => {
-                while right_tuple != None && !self.predicate.op.compare(
-                    lt.get_field(self.predicate.left_index).unwrap(),
-                    right_tuple.as_ref().unwrap().get_field(self.predicate.left_index).unwrap()
-                ) {
-                    right_tuple = self.right_child.next()?;
+        // Set value for inner table loop
+        let mut inner_tuple = self.right_child.next()?;
+        match &self.outer_tuple {
+            // If outer table still iterating,
+            Some(ot) => {
+                // Iterate through inner table until you reach the end, or
+                // find a match on the join predicate
+                while inner_tuple != None
+                    && !self.predicate.op.compare(
+                        ot.get_field(self.predicate.left_index).unwrap(),
+                        inner_tuple
+                            .as_ref()
+                            .unwrap()
+                            .get_field(self.predicate.left_index)
+                            .unwrap(),
+                    )
+                {
+                    inner_tuple = self.right_child.next()?;
                 }
-                match right_tuple {
+                match inner_tuple {
+                    // If you reached a match on the predicate, return merged tuples
+                    Some(it) => Ok(Some(ot.merge(&it))),
+                    // If you reached the end of the table, advance outer table
+                    // loop and reset inner table loop. Return the next value
                     None => {
-                        self.left_tuple = self.left_child.next()?;
-                        self.right_child.rewind();
+                        self.outer_tuple = self.left_child.next()?;
+                        self.right_child.rewind()?;
                         self.next()
-                    },
-                    Some(rt) => Ok(Some(lt.merge(&rt))),
+                    }
                 }
-            },
+            }
+            // If outer table loop reaches end, whole join is complete, return None
             None => Ok(None),
         }
     }
@@ -135,14 +128,8 @@ impl OpIterator for Join {
         if !self.open {
             panic!("OpIterator not open");
         }
-        //self.joined_iter.as_mut().unwrap().close();
-        //self.joined_iter = None;
-        if let Err(e) = self.left_child.close() {
-            panic!("Cannot close left_child: {}", e);
-        }
-        if let Err(e) = self.right_child.close() {
-            panic!("Cannot close right_child: {}", e);
-        }
+        self.left_child.close()?;
+        self.right_child.close()?;
         self.open = false;
         Ok(())
     }
@@ -151,11 +138,11 @@ impl OpIterator for Join {
         if !self.open {
             panic!("OpIterator not open");
         }
-        self.left_child.rewind();
-        self.left_tuple = self.left_child.next()?;
-        self.right_child.rewind();
+        self.left_child.rewind()?;
+        // Reset outer table loop
+        self.outer_tuple = self.left_child.next()?;
+        self.right_child.rewind()?;
         Ok(())
-        //self.joined_iter.as_mut().unwrap().rewind()
     }
 
     // Return schema of the result
@@ -175,9 +162,7 @@ pub struct HashEqJoin {
     /// Schema of the result.
     schema: TableSchema,
 
-    joined_iter: Option<TupleIterator>,
-
-    build_input: HashMap<Field,Tuple>,
+    build_input: HashMap<Field, Tuple>,
 
     open: bool,
 }
@@ -200,12 +185,11 @@ impl HashEqJoin {
         left_child: Box<dyn OpIterator>,
         right_child: Box<dyn OpIterator>,
     ) -> Self {
-        HashEqJoin{
+        HashEqJoin {
             predicate: JoinPredicate::new(op, left_index, right_index),
             schema: left_child.get_schema().merge(right_child.get_schema()),
-            left_child: left_child,
-            right_child: right_child,
-            joined_iter: None,
+            left_child,
+            right_child,
             build_input: HashMap::new(),
             open: false,
         }
@@ -214,15 +198,14 @@ impl HashEqJoin {
 
 impl OpIterator for HashEqJoin {
     fn open(&mut self) -> Result<(), CrustyError> {
-        if let Err(e) = self.left_child.open() {
-            panic!("Cannot open left_child: {}", e);
-        }
-        if let Err(e) = self.right_child.open() {
-            panic!("Cannot open right_child: {}", e);
-        }
-        
+        self.left_child.open()?;
+        self.right_child.open()?;
+
+        // Arbitrarily choose left child to build_input on, populate keys with
+        // fields corresponding to left_index of join predicate
         while let Ok(Some(lt)) = self.left_child.next() {
-            self.build_input.insert(lt.get_field(self.predicate.left_index).unwrap().clone(),lt);
+            self.build_input
+                .insert(lt.get_field(self.predicate.left_index).unwrap().clone(), lt);
         }
         self.open = true;
         Ok(())
@@ -232,16 +215,22 @@ impl OpIterator for HashEqJoin {
         if !self.open {
             panic!("OpIterator not open");
         }
+        // Pull next tuple from right
         match self.right_child.next() {
+            // If its a tuple,
             Ok(Some(rt)) => {
+                // Get the field specified by the join predicate
                 let r_key = rt.get_field(self.predicate.right_index).unwrap();
-                if self.build_input.contains_key(&r_key){
-                    let mut lt = self.build_input[r_key].clone();
+                // check if it's in the hash table, if it is, return the merged
+                // tuple, otherwise check the next value
+                if self.build_input.contains_key(r_key) {
+                    let lt = self.build_input[r_key].clone();
                     Ok(Some(lt.merge(&rt)))
                 } else {
                     self.next()
                 }
-            },
+            }
+            // Otherwise return the error or Ok(None)
             ne => ne,
         }
     }
@@ -250,14 +239,11 @@ impl OpIterator for HashEqJoin {
         if !self.open {
             panic!("OpIterator not open");
         }
+        // erase the stored hash table
         self.build_input.clear();
         self.open = false;
-        if let Err(e) = self.left_child.close() {
-            panic!("Cannot close left_child: {}", e);
-        }
-        if let Err(e) = self.right_child.close() {
-            panic!("Cannot close right_child: {}", e);
-        }
+        self.left_child.close()?;
+        self.right_child.close()?;
         Ok(())
     }
 

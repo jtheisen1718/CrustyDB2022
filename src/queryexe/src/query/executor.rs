@@ -104,7 +104,7 @@ impl Executor {
                 self.start()?;
                 while let Some(t) = &self.next()? {
                     for f in t.field_vals() {
-                        let s = format!("{},", f.to_string());
+                        let s = format!("{},", f);
                         res.push_str(&s);
                     }
                     //remove the last ,

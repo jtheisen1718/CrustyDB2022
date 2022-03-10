@@ -111,7 +111,6 @@ impl StorageTrait for StorageManager {
                 containers: RwLock::new(HashMap::new()),
             }
         } else {
-            
             let metadata = fs::OpenOptions::new()
                 .read(true)
                 .write(false)
@@ -200,7 +199,8 @@ impl StorageTrait for StorageManager {
             let mut v_id = ValueId::new(container_id);
             v_id.page_id = Some(page_id);
             v_id.slot_id = modified_page.add_value(&value);
-            { // Drop locks on p_ids, heapfile, and containers
+            {
+                // Drop locks on p_ids, heapfile, and containers
                 let _p = p_ids;
                 let _h = heapfile;
                 let _c = containers;
@@ -214,7 +214,8 @@ impl StorageTrait for StorageManager {
             v_id.page_id = Some(page_id);
             let mut new_page = Page::new(page_id);
             v_id.slot_id = new_page.add_value(&value);
-            { // Drop locks on p_ids, heapfile, and containers
+            {
+                // Drop locks on p_ids, heapfile, and containers
                 let _p = p_ids;
                 let _h = heapfile;
                 let _c = containers;
@@ -269,7 +270,9 @@ impl StorageTrait for StorageManager {
     ) -> Result<ValueId, CrustyError> {
         if let Err(e) = self.delete_value(id, _tid) {
             return Err(CrustyError::CrustyError(format!(
-                "Cannot delete value: {:?}",e)));
+                "Cannot delete value: {:?}",
+                e
+            )));
         };
         Ok(self.insert_value(id.container_id, value, _tid))
     }

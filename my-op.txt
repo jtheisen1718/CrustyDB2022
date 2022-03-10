@@ -1,0 +1,111 @@
+# Design decisions
+## Aggregate.rs
+### Aggregator
+I added group_vals, a hashmap with Vec<Field> keys and values to the Aggregator 
+struct. A hashmap was perfect because I could quickly look up the group id of 
+whatever tuple I was given and update the aggregator values for that tuple. 
+Keeping the group_id as a field meant I wouldn't have to create a new tuple
+from the tuple I was pulled from child, I could just look up the fields that I
+pulled from the groupby_indices. Keeping the aggregator values as a vector of 
+fields made them easily editable and of variable length (for initialization).
+having them both as fields rather than i32s supported easy tuple construction,
+groupby vals of strings as well as integers, and easy comparison for min and max.
+
+#### merge_tuple_into_group
+My main problem here was that Sum, Min, Max, and Count all require only one i32
+of data to keep their values. Avg requires 2. If they all required 1, agg_values
+could have its indexes correspond 1 to 1 with agg_fields. This way I could iterate
+through an enumeration of agg_fields and keep track of which agg_value I had to 
+update or initialize. An average would throw this off, however because it would
+require a count as well. Needing two elements would make all the following 
+indices off by one. However, since they would be off by one for each avg that
+appeared before them, I could just keep a count of how many averages I saw as a
+variable initialized to zero before I started looping through the agg_fields.
+This way I could store a sum and a count for each average and still use the index
+of agg_fields as a faster way to access the information for each aggregate. 
+Storing a sum and a count and then calculating the average later (instead of 
+keeping a running average and count) means each average requires only one
+division operation instead of however many tuples child contains. This solution
+avoids having a second vector for each distinct groupby field set and each aggregator
+included, so it is efficient for memory and computation. With more time, I 
+probably would've made sure I wasn't keeping double counts (if someone asked
+for the count and average of the same field). 
+
+#### iterator
+The iterator just loops through every key,value pair of the group_by keys and
+aggregate values. Averages are calculated here to be most computationally efficient.
+The tuple is finally created from each vector field and it is returned.
+
+### Aggregate
+The schema for the aggregate output is created by forming attributes from the name
+of each groupby_name and using the schema of the child to get the datatype of each
+groupby_index. The aggregate value attributes are created while combining the
+agg_indices and agg_ops into an agg_fields vector (to create the aggregator).
+agg_names is paired with a DataType::Int for each index of agg_fields.
+This attributes are all combined into one vector, which is used to create the
+schema.
+
+### OpIterator
+Open first opens the child, then creates an aggregator and pulls each tuple
+with child.next() to be fed to the aggregator. The aggregator is then turned into
+a TupleIterator, stored in the struct.
+
+## Join.rs
+By always merging tuples left.merge(right), the schema for a join was always
+able to just be left_child.get_schema().merge(right_child.get_schema()).
+
+### NLJoin
+I added an outer_tuple field to the struct to keep track of the outer table loop.
+This field was set in open, and then matched in next. If at any point the outer
+outer_tuple was None, that meant the outer loop was finished, so the inner loop
+was finished an the join returned None. If the outer loop had some value, a new
+tuple was pulled from the inner table until one was None or matched the outer 
+tuple on the join predicate. If it was None, the outer loop moved to the next tuple
+with .next() and the inner loop reset. self.next() was then recursively called to 
+supply the next match without interruption. If the inner tuple was a match, it
+was merged with the outer tuple and returned. Rewind not only rewound each child,
+but also reset the outer_tuple to the first value in one of the children (arbitrarily 
+the left).
+
+### HashEqJoin
+Open builds a build_input from the left child. Ideally, there would be a faster
+way to identify which child was smaller than simply iterating through each and
+counting the tuples. With more time, I'd have implemented some summary statistics.
+The join was fast enough just by hashing a random table, but it is better to
+create the build-input from the smaller table. open() opens each child and builds
+build_input by filling the hashmap with keys from the join_predicate field and 
+the entire tuple as values. Next calls right_child.next(). If it matches a value,
+the value is checked on the build_input. If it contains the key, the tuples are 
+merged and returned, if not, it recursively calls self.next(). If right_child.next()
+returns an error or a None, that is returned. Close() empties the hashmap. Rewind
+only rewinds the right_child. There's no reason to rehash the left_child.
+
+
+# Time
+This milestone was the shortest and felt the most reasonable. It took me the 
+weekend to create the whole thing, probably about 12 hours. 
+The e2e testing, however, does not work on WSL for windows (at least in my 
+experience), so figuring that out took another 4-6 hours.
+
+
+# Likes
+This was by far the most fun part of the project. I enjoyed reasoning through
+each problem and getting them all to work with the code. Getting to implement
+algorithms for sql commands was great experience and definitely something I'd
+put on a resume or speak about in an interview.
+
+## Dislikes
+I had immense issues with the sql testing. I kept trying to run it, killing any
+existing processes each time, but serverwrapper.rs could never successfully run 
+    line 37: let stream = TcpStream::connect(bind_addr)?;
+    where bind_addr is "127.0.0.1:3333"
+Gradescope ran my tests and I implemented everything correctly so I didn't run
+into any issues where I needed the error messages from the sql tests, but if
+I had failed any of the tests, I wouldn't have known which ones I failed or why.
+I know this assignment has been a work in progress, so it's no big deal, but it
+was anxiety-inducing when I couldn't figure out how to test something I'd be 
+graded on, especially when there are no points given to late turn-ins.
+
+
+# Completion
+Everything is complete

@@ -169,8 +169,8 @@ impl ServerState {
     }
 
     pub fn close_client_connection(&self, client_id: u64) {
-        // putting read/write grabs in separate scopes to avoid the same thread 
-        // from write-starving active_connections using different scopes to allow 
+        // putting read/write grabs in separate scopes to avoid the same thread
+        // from write-starving active_connections using different scopes to allow
         // for parallelism during portions of this function
         {
             // indicate DB this client is disconnecting

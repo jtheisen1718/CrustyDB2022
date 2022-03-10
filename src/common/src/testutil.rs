@@ -86,7 +86,7 @@ pub fn gen_table_for_test_tuples(table_name: String) -> Table {
 
     for n in 1..5 {
         let attr = Attribute {
-            name: format!("ia{}", n.to_string()),
+            name: format!("ia{}", n),
             dtype: DataType::Int,
             constraint: Constraint::None,
         };
@@ -94,7 +94,7 @@ pub fn gen_table_for_test_tuples(table_name: String) -> Table {
     }
     for n in 1..5 {
         let attr = Attribute {
-            name: format!("sa{}", n.to_string()),
+            name: format!("sa{}", n),
             dtype: DataType::String,
             constraint: Constraint::None,
         };
