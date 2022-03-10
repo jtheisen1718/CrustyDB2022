@@ -40,7 +40,7 @@ pub struct Join {
     /// Schema of the result.
     schema: TableSchema,
 
-    joined_iter: Option<TupleIterator>,
+    left_tuple: Option<Tuple>,//joined_iter: Option<TupleIterator>,
 
     open: bool,
 }
@@ -67,7 +67,7 @@ impl Join {
             schema: left_child.get_schema().merge(right_child.get_schema()),
             left_child: left_child,
             right_child: right_child,
-            joined_iter: None,
+            left_tuple: None,//joined_iter: None,
             open: false,
         }
     }
@@ -81,7 +81,7 @@ impl OpIterator for Join {
         if let Err(e) = self.right_child.open() {
             panic!("Cannot open right_child: {}", e);
         }
-        let mut tuples: Vec<Tuple> = Vec::new();
+        /* let mut tuples: Vec<Tuple> = Vec::new();
         while let Ok(Some(lt)) = self.left_child.next() {
             while let Ok(Some(rt)) = self.right_child.next() {
                 if self.predicate.op.compare(
@@ -97,8 +97,9 @@ impl OpIterator for Join {
         if let Err(e) = i.open() {
             panic!("Cannot open TupleIterator: {}", e);
         }
+        self.joined_iter = Some(i); */
+        self.left_tuple = self.left_child.next()?;
         self.open = true;
-        self.joined_iter = Some(i);
         Ok(())
     }
 
@@ -107,22 +108,42 @@ impl OpIterator for Join {
         if !self.open {
             panic!("OpIterator not open");
         }
-        self.joined_iter.as_mut().unwrap().next()
+        //self.joined_iter.as_mut().unwrap().next()
+        let mut right_tuple = self.right_child.next()?;
+        match &self.left_tuple {
+            Some(lt) => {
+                while right_tuple != None && !self.predicate.op.compare(
+                    lt.get_field(self.predicate.left_index).unwrap(),
+                    right_tuple.as_ref().unwrap().get_field(self.predicate.left_index).unwrap()
+                ) {
+                    right_tuple = self.right_child.next()?;
+                }
+                match right_tuple {
+                    None => {
+                        self.left_tuple = self.left_child.next()?;
+                        self.right_child.rewind();
+                        self.next()
+                    },
+                    Some(rt) => Ok(Some(lt.merge(&rt))),
+                }
+            },
+            None => Ok(None),
+        }
     }
 
     fn close(&mut self) -> Result<(), CrustyError> {
         if !self.open {
             panic!("OpIterator not open");
         }
-        self.joined_iter.as_mut().unwrap().close();
-        self.joined_iter = None;
-        self.open = false;
+        //self.joined_iter.as_mut().unwrap().close();
+        //self.joined_iter = None;
         if let Err(e) = self.left_child.close() {
             panic!("Cannot close left_child: {}", e);
         }
         if let Err(e) = self.right_child.close() {
             panic!("Cannot close right_child: {}", e);
         }
+        self.open = false;
         Ok(())
     }
 
@@ -130,7 +151,11 @@ impl OpIterator for Join {
         if !self.open {
             panic!("OpIterator not open");
         }
-        self.joined_iter.as_mut().unwrap().rewind()
+        self.left_child.rewind();
+        self.left_tuple = self.left_child.next()?;
+        self.right_child.rewind();
+        Ok(())
+        //self.joined_iter.as_mut().unwrap().rewind()
     }
 
     // Return schema of the result
