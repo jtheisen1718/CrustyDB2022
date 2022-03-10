@@ -371,6 +371,7 @@ impl StorageTrait for StorageManager {
         let mut containers = self.containers.write().unwrap();
         containers.clear();
         fs::remove_dir_all(self.storage_path.clone()).unwrap();
+        fs::create_dir_all(self.storage_path.clone()).unwrap();
         Ok(())
     }
 
