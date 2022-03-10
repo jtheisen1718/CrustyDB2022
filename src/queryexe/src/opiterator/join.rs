@@ -161,9 +161,9 @@ pub struct HashEqJoin {
     right_child: Box<dyn OpIterator>,
     /// Schema of the result.
     schema: TableSchema,
-
+    /// Hashmap of one table's join predicate field to its tuples.
     build_input: HashMap<Field, Tuple>,
-
+    /// bool to indicate if the join is open
     open: bool,
 }
 

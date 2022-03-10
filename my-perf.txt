@@ -1,0 +1,16 @@
+I'd like to write more here, but I paid a lot of attention to performance
+when coding qo. This milestone took about an hour. I poked around through the 
+tests and Ed. I realized the tests were all using nested loop joins to join on
+an equality predicate. I found that optimizer.rs was setting which join to use,
+so I switched the nested loop joins to hash joins. I picked an arbitrary
+hash_table_key from another test and got a hash_table_state_id with 
+get_new_container_id. On the submission before this, my tests performed as so:
+
+  test  | runtime / baseline
+--------+--------------------
+tiny    |       73.2%
+left    |        1.6%
+right   |        1.5%
+large   |        0.6%
+
+Those times look good to me, so I just wrote this and I'm now pushing.
