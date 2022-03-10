@@ -37,12 +37,12 @@ impl Aggregator {
         groupby_fields: Vec<usize>,
         schema: &TableSchema,
     ) -> Self {
-        Aggregator {
-            agg_fields,
-            groupby_fields,
+        return Aggregator {
+            agg_fields: agg_fields,
+            groupby_fields: groupby_fields,
             schema: schema.clone(),
             group_vals: HashMap::new(),
-        }
+        };
     }
 
     /// Handles the creation of groups for aggregation.
@@ -73,7 +73,13 @@ impl Aggregator {
                     AggOp::Count => {
                         aggs.push(Field::IntField(1));
                     }
-                    _ => {
+                    AggOp::Max => {
+                        aggs.push(tuple.get_field(af.field).unwrap().clone());
+                    }
+                    AggOp::Min => {
+                        aggs.push(tuple.get_field(af.field).unwrap().clone());
+                    }
+                    AggOp::Sum => {
                         aggs.push(tuple.get_field(af.field).unwrap().clone());
                     }
                 }
@@ -122,9 +128,10 @@ impl Aggregator {
     /// Resulting tuples must be of the form: (group by fields ..., aggregate fields ...)
     pub fn iterator(&self) -> TupleIterator {
         let mut tuples: Vec<Tuple> = Vec::new();
-        for (group_id, aggs) in &self.group_vals {
+        for (group_id, aggregates) in &self.group_vals {
             // Turn aggregates into tuple
             let mut fields: Vec<Field> = Vec::new();
+            let aggs = &self.group_vals[group_id];
             let mut avgs = 0;
             for (idx, af) in self.agg_fields.iter().enumerate() {
                 match af.op {
@@ -146,12 +153,14 @@ impl Aggregator {
 
 /// Aggregate operator. (You can add any other fields that you think are neccessary)
 pub struct Aggregate {
-    /// Fields to groupby over
+    /// Fields to groupby over.
     groupby_fields: Vec<usize>,
-    /// Aggregtion fields and corresponding aggregation fucntions
+    /// Aggregation fields and corresponding aggregation functions.
     agg_fields: Vec<AggregateField>,
     /// Aggregation iterators for results.
     agg_iter: Option<TupleIterator>,
+    /// Aggregator
+    aggregator: Aggregator,
     /// Output schema of the form [groupby_field attributes ..., agg_field attributes ...]).
     schema: TableSchema,
     /// Boolean if the iterator is open.
@@ -179,12 +188,8 @@ impl Aggregate {
         ops: Vec<AggOp>,
         child: Box<dyn OpIterator>,
     ) -> Self {
-        // Create empty attributes vector
         let mut attributes: Vec<Attribute> = Vec::new();
-
-        // Loop through groupby indices
         for (idx, gi) in groupby_indices.iter().enumerate() {
-            // find the attribute at each groupby index
             let mut a = child.get_schema().get_attribute(*gi).unwrap().clone();
             a.name = groupby_names[idx].to_string();
             attributes.push(a);
@@ -196,18 +201,20 @@ impl Aggregate {
                 field: *ai,
                 op: ops[idx],
             });
-            let a = Attribute::new(agg_names[idx].to_string(), DataType::Int); //MAX BEHAVIOR
+            let a = Attribute::new(agg_names[idx].to_string(), DataType::Int);
             attributes.push(a);
         }
         let schema = TableSchema::new(attributes);
-        Aggregate {
+        let aggregator = Aggregator::new(agg_fields.clone(), groupby_indices.clone(), &schema);
+        return Aggregate {
             groupby_fields: groupby_indices,
-            agg_fields,
+            agg_fields: agg_fields,
             agg_iter: None,
-            schema,
+            aggregator: aggregator,
+            schema: schema,
             open: false,
-            child,
-        }
+            child: child,
+        };
     }
 }
 
@@ -217,15 +224,10 @@ impl OpIterator for Aggregate {
             if let Err(e) = self.child.open() {
                 panic!("Cannot open child: {}", e);
             };
-            let mut aggregator = Aggregator::new(
-                self.agg_fields.clone(),
-                self.groupby_fields.clone(),
-                &self.schema,
-            );
             while let Ok(Some(tuple)) = self.child.next() {
-                aggregator.merge_tuple_into_group(&tuple);
+                self.aggregator.merge_tuple_into_group(&tuple);
             }
-            let mut i = aggregator.iterator();
+            let mut i = self.aggregator.iterator();
             if let Err(e) = i.open() {
                 panic!("Cannot open TupleIterator: {}", e);
             };
@@ -248,9 +250,7 @@ impl OpIterator for Aggregate {
         if !self.open {
             panic!("OpIterator not open");
         }
-        if let Err(e) = self.agg_iter.as_mut().unwrap().close() {
-            panic!("Cannot close iterator: {}", e);
-        }
+        self.agg_iter.as_mut().unwrap().close();
         self.agg_iter = None;
         self.open = false;
         self.child.close()

@@ -7,7 +7,6 @@ mod test {
     const E2E_DIR: &str = "e2e-tests";
     #[test]
     fn run_sql_logic_tests() {
-        println!("HEre");
         let test_dir = if std::env::current_dir().unwrap().ends_with(E2E_DIR) {
             Path::new("testdata").to_path_buf()
         } else {

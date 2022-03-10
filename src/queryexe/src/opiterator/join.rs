@@ -65,8 +65,8 @@ impl Join {
         Join {
             predicate: JoinPredicate::new(op, left_index, right_index),
             schema: left_child.get_schema().merge(right_child.get_schema()),
-            left_child,
-            right_child,
+            left_child: left_child,
+            right_child: right_child,
             joined_iter: None,
             open: false,
         }
@@ -86,14 +86,12 @@ impl OpIterator for Join {
             while let Ok(Some(rt)) = self.right_child.next() {
                 if self.predicate.op.compare(
                     lt.get_field(self.predicate.left_index).unwrap(),
-                    rt.get_field(self.predicate.left_index).unwrap(),
+                    rt.get_field(self.predicate.left_index).unwrap()
                 ) {
                     tuples.push(lt.merge(&rt));
                 }
             }
-            if let Err(e) = self.right_child.rewind() {
-                panic!("Cannot rewind right_child: {}", e);
-            }
+            self.right_child.rewind();
         }
         let mut i = TupleIterator::new(tuples, self.schema.clone());
         if let Err(e) = i.open() {
@@ -116,9 +114,7 @@ impl OpIterator for Join {
         if !self.open {
             panic!("OpIterator not open");
         }
-        if let Err(e) = self.joined_iter.as_mut().unwrap().close() {
-            panic!("Cannot close iterator: {}", e);
-        }
+        self.joined_iter.as_mut().unwrap().close();
         self.joined_iter = None;
         self.open = false;
         if let Err(e) = self.left_child.close() {
@@ -154,7 +150,9 @@ pub struct HashEqJoin {
     /// Schema of the result.
     schema: TableSchema,
 
-    build_input: HashMap<Field, Tuple>,
+    joined_iter: Option<TupleIterator>,
+
+    build_input: HashMap<Field,Tuple>,
 
     open: bool,
 }
@@ -177,11 +175,12 @@ impl HashEqJoin {
         left_child: Box<dyn OpIterator>,
         right_child: Box<dyn OpIterator>,
     ) -> Self {
-        HashEqJoin {
+        HashEqJoin{
             predicate: JoinPredicate::new(op, left_index, right_index),
             schema: left_child.get_schema().merge(right_child.get_schema()),
-            left_child,
-            right_child,
+            left_child: left_child,
+            right_child: right_child,
+            joined_iter: None,
             build_input: HashMap::new(),
             open: false,
         }
@@ -196,10 +195,9 @@ impl OpIterator for HashEqJoin {
         if let Err(e) = self.right_child.open() {
             panic!("Cannot open right_child: {}", e);
         }
-
+        
         while let Ok(Some(lt)) = self.left_child.next() {
-            self.build_input
-                .insert(lt.get_field(self.predicate.left_index).unwrap().clone(), lt);
+            self.build_input.insert(lt.get_field(self.predicate.left_index).unwrap().clone(),lt);
         }
         self.open = true;
         Ok(())
@@ -212,12 +210,13 @@ impl OpIterator for HashEqJoin {
         match self.right_child.next() {
             Ok(Some(rt)) => {
                 let r_key = rt.get_field(self.predicate.right_index).unwrap();
-                if self.build_input.contains_key(r_key) {
-                    Ok(Some(self.build_input[r_key].merge(&rt)))
+                if self.build_input.contains_key(&r_key){
+                    let mut lt = self.build_input[r_key].clone();
+                    Ok(Some(lt.merge(&rt)))
                 } else {
                     self.next()
                 }
-            }
+            },
             ne => ne,
         }
     }
